@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "900588203511",
+    "project_id": "ceg1pobe-b9117",
+    "storage_bucket": "ceg1pobe-b9117.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:900588203511:android:ac02ad95f97b708c9e12f2",
+        "android_client_info": {
+          "package_name": "bj.ceg1pobe.ceg1_pobe_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlyg2ot88y-IaDJ-CMfQIvRaFxOUC5-SQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

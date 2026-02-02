@@ -12,6 +12,7 @@ class GradingScreen extends StatefulWidget {
   final int semester;
   final String type;
   final int typeIndex;
+  final String title;
   final VoidCallback onBack;
   final VoidCallback onSubmit;
 
@@ -24,6 +25,7 @@ class GradingScreen extends StatefulWidget {
     required this.typeIndex,
     required this.onBack,
     required this.onSubmit,
+    required this.title,
   });
 
   @override
@@ -37,30 +39,71 @@ class _GradingScreenState extends State<GradingScreen> {
 
   Future<void> _saveGrades() async {
     setState(() => _isSaving = true);
+
+    // 1. Validation des notes
+    for (var s in students) {
+      if (s.note != null && (s.note! < 0 || s.note! > 20)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Note invalide pour ${s.name}. La note doit être comprise entre 0 et 20.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _isSaving = false);
+        return;
+      }
+    }
+
     try {
       final isOnline = await SupabaseService.isOnline();
-      final user = SupabaseService.client.auth.currentUser;
 
+      // Préparation des données pour l'envoi groupé
+      List<Map<String, dynamic>> gradesList = [];
       for (var student in students) {
         if (student.note != null || student.isAbsent) {
-          final gradeData = {
+          gradesList.add({
             'student_id': student.id,
-            'class_id': int.parse(widget.schoolClass.id),
-            'subject_id': widget.schoolClass.subjectId,
-            'semester': widget.semester,
-            'eval_type': '${widget.type.toUpperCase()}_${widget.typeIndex}',
-            'score': student.note,
+            'note': student.note,
             'is_absent': student.isAbsent,
-            'created_by': user?.id,
-          };
-
-          if (isOnline) {
-            await SupabaseService.saveGrade(gradeData);
-          } else {
-            // MODE HORS-LIGNE : Ajouter à la file d'attente locale
-            await PersistenceService.addPendingGrade(gradeData);
-          }
+          });
         }
+      }
+
+      if (gradesList.isEmpty) {
+        if (!mounted) return;
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Aucune note saisie à sauvegarder.')),
+        );
+        return;
+      }
+
+      if (isOnline) {
+        await SupabaseService.submitEvaluationGrades(
+          classId: int.parse(widget.schoolClass.id),
+          subjectId: widget.schoolClass.subjectId!,
+          semester: widget.semester,
+          type: widget
+              .type, // "Interrogation" ou "Devoir" (Respecte la Casse du V2)
+          index: widget.typeIndex,
+          title: widget.title,
+          grades: gradesList,
+        );
+      } else {
+        // MODE HORS-LIGNE : Stockage de l'évaluation entière
+        await PersistenceService.addPendingEvaluation({
+          'classId': int.parse(widget.schoolClass.id),
+          'subjectId': widget.schoolClass.subjectId!,
+          'semester': widget.semester,
+          'type': widget.type,
+          'index': widget.typeIndex,
+          'title': widget.title,
+          'grades': gradesList,
+        });
       }
 
       if (mounted) {
@@ -68,10 +111,10 @@ class _GradingScreenState extends State<GradingScreen> {
           SnackBar(
             content: Text(
               isOnline
-                  ? 'Notes sauvegardées avec succès !'
-                  : 'Mode hors-ligne : Notes enregistrées localement.',
+                  ? 'Évaluation sauvegardée avec succès !'
+                  : 'Sauvegardé localement.',
             ),
-            backgroundColor: isOnline ? Colors.green : Colors.orange,
+            backgroundColor: Colors.green,
           ),
         );
         widget.onSubmit();

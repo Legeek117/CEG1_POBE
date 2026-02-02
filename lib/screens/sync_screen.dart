@@ -43,37 +43,47 @@ class _SyncScreenState extends State<SyncScreen> {
       _updateProgress(0.1);
       _addLog('Connexion au serveur Supabase... ✅');
 
-      // 1. Traitement des notes en attente
+      // 1. Traitement des évaluations en attente (Synchronisation V2)
       _addLog('Vérification de la file d\'attente locale...');
-      final pendingGrades = await PersistenceService.loadPendingGrades();
+      final pendingEvals = await PersistenceService.loadPendingEvaluations();
 
-      if (pendingGrades.isNotEmpty) {
-        _addLog('${pendingGrades.length} notes à synchroniser.');
-        for (int i = 0; i < pendingGrades.length; i++) {
-          final grade = pendingGrades[i];
+      if (pendingEvals.isNotEmpty) {
+        _addLog('${pendingEvals.length} évaluations à synchroniser.');
+        for (int i = 0; i < pendingEvals.length; i++) {
+          final eval = pendingEvals[i];
           try {
-            await SupabaseService.saveGrade(grade);
-            _updateProgress(0.1 + (0.5 * (i + 1) / pendingGrades.length));
+            await SupabaseService.submitEvaluationGrades(
+              classId: eval['classId'] is String
+                  ? int.parse(eval['classId'])
+                  : eval['classId'],
+              subjectId: eval['subjectId'],
+              semester: eval['semester'],
+              type: eval['type'],
+              index: eval['index'],
+              title: eval['title'],
+              grades: List<Map<String, dynamic>>.from(eval['grades']),
+            );
+            _updateProgress(0.1 + (0.5 * (i + 1) / pendingEvals.length));
           } catch (e) {
-            _addLog('⚠️ Erreur sur une note : $e');
+            _addLog('⚠️ Erreur sur une évaluation : $e');
           }
         }
-        await PersistenceService.clearPendingGrades();
-        _addLog('Synchronisation des notes terminée. ✅');
+        await PersistenceService.clearPendingEvaluations();
+        _addLog('Synchronisation des évaluations terminée. ✅');
       } else {
-        _addLog('Aucune note en attente. ✅');
+        _addLog('Aucune évaluation en attente. ✅');
         _updateProgress(0.6);
       }
 
       // 2. Rafraîchissement du cache des données scolaires
       _addLog('Mise à jour des classes et matières...');
       final fetchedClassesData = await SupabaseService.fetchTeacherClasses();
-      final classes = fetchedClassesData
+      final List<SchoolClass> classes = fetchedClassesData
           .map(
             (c) => SchoolClass(
               id: c['id'].toString(),
               name: c['name'],
-              studentCount: 0,
+              studentCount: c['student_count'] ?? 0,
               lastEntryDate: 'N/A',
               matieres: [c['subject_name']],
               subjectId: c['subject_id'],

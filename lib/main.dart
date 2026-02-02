@@ -3,6 +3,8 @@ import 'theme.dart';
 import 'models/school_data.dart';
 import 'mock_data.dart';
 import 'screens/login_screen.dart';
+import 'screens/registration_screen.dart';
+import 'screens/pending_approval_screen.dart';
 import 'screens/change_password_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/setup_eval_screen.dart';
@@ -72,6 +74,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
   int? selectedSemester;
   String? selectedEvalType;
   int? selectedEvalIndex;
+  String? selectedTitle;
 
   @override
   void initState() {
@@ -205,6 +208,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
     switch (currentPage) {
       case 'login':
         return LoginScreen(
+          onRegister: () => navigateTo('registration'),
           onLoginSuccess: () async {
             // 1. Récupérer le profil pour vérifier si changement de pass requis
             final profile = await SupabaseService.fetchCurrentProfile();
@@ -222,6 +226,13 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
             }
           },
         );
+      case 'registration':
+        return RegistrationScreen(
+          onBack: () => navigateTo('login'),
+          onRegistrationSuccess: () => navigateTo('pending_approval'),
+        );
+      case 'pending_approval':
+        return PendingApprovalScreen(onBackToLogin: () => navigateTo('login'));
       case 'change_password':
         return ChangePasswordScreen(
           isForced: isFirstLogin,
@@ -249,12 +260,13 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         return SetupEvalScreen(
           schoolClass: selectedClass!,
           onBack: () => navigateTo('dashboard'),
-          onContinue: (subject, sem, type, index) {
+          onContinue: (subject, sem, type, index, title) {
             setState(() {
               selectedSubject = subject;
               selectedSemester = sem;
               selectedEvalType = type;
               selectedEvalIndex = index;
+              selectedTitle = title;
             });
             navigateTo('grading');
           },
@@ -266,6 +278,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           semester: selectedSemester!,
           type: selectedEvalType!,
           typeIndex: selectedEvalIndex!,
+          title: selectedTitle!,
           onBack: () => navigateTo('setup_eval'),
           onSubmit: () => navigateTo('dashboard'),
         );

@@ -73,25 +73,52 @@ class SupabaseService {
     final user = client.auth.currentUser;
     if (user == null) return [];
 
-    // Jointure : teacher_assignments -> classes (avec count students) et subjects
+    // Jointure complexe : teacher_assignments -> classes, subjects et coefficients
     final response = await client
         .from('teacher_assignments')
-        .select('subject_id, subjects(name), classes(*, students(count))')
-        .eq('teacher_id', user.id);
+        .select('''
+          subject_id, 
+          subjects(name), 
+          classes(
+            *, 
+            students(count),
+            class_subjects!inner(coefficient)
+          )
+        ''')
+        .eq('teacher_id', user.id)
+        .eq(
+          'classes.class_subjects.subject_id',
+          client.from('teacher_assignments').select('subject_id'),
+        );
+    // Note: La syntaxe ci-dessus pour filter sur subject_id dans la jointure peut être complexe.
+    // Approche plus simple : Fetch coefficients séparément ou via une vue si besoin.
+    // Mais essayons de mapper proprement ce qu'on reçoit.
 
-    return List<Map<String, dynamic>>.from(
-      response.map((e) {
-        final classData = Map<String, dynamic>.from(e['classes'] as Map);
-        classData['subject_id'] = e['subject_id'];
-        classData['subject_name'] = (e['subjects'] as Map)['name'];
-        // Extraction du count
-        final studentsList = classData['students'] as List;
-        classData['student_count'] = studentsList.isNotEmpty
-            ? studentsList[0]['count']
-            : 0;
-        return classData;
-      }),
-    );
+    final List<dynamic> data = response as List<dynamic>;
+
+    return data.map((e) {
+      final classData = Map<String, dynamic>.from(e['classes'] as Map);
+      final subjectId = e['subject_id'];
+      classData['subject_id'] = subjectId;
+      classData['subject_name'] = (e['subjects'] as Map)['name'];
+
+      // Extraction du count
+      final studentsList = classData['students'] as List;
+      classData['student_count'] = studentsList.isNotEmpty
+          ? studentsList[0]['count']
+          : 0;
+
+      // Extraction du coefficient spécifique à cette classe/matière
+      final classSubjects = classData['class_subjects'] as List;
+      // On cherche l'entrée qui correspond à la matière de l'assignation
+      final specificSubj = classSubjects.firstWhere(
+        (cs) => cs['subject_id'] == subjectId,
+        orElse: () => {'coefficient': 1},
+      );
+      classData['coefficient'] = specificSubj['coefficient'];
+
+      return classData;
+    }).toList();
   }
 
   static Future<List<Map<String, dynamic>>> fetchStudentsInClass(
@@ -104,6 +131,81 @@ class SupabaseService {
   }
 
   // --- Evaluations & Grades ---
+  // --- Evaluations & Grades (V2 Schema) ---
+
+  static Future<void> submitEvaluationGrades({
+    required int classId,
+    required int subjectId,
+    required int semester,
+    required String type,
+    required int index,
+    required String title,
+    required List<Map<String, dynamic>> grades,
+  }) async {
+    final user = client.auth.currentUser;
+    if (user == null) throw Exception("Non authentifié");
+
+    // 1. Créer ou Récupérer l'évaluation (Upsert implicite sur unique keys?)
+    // Le schéma a UNIQUE(type, index) sur censor_unlocks, mais sur evaluations ??
+    // Le script SQL ne montre pas d'UNIQUE sur evaluations(class, subject, semester, type, index)
+    // On va donc faire: Select -> If empty -> Insert -> Return ID
+
+    // Tentative de récupération
+    final existingEval = await client
+        .from('evaluations')
+        .select('id')
+        .eq('class_id', classId)
+        .eq('subject_id', subjectId)
+        .eq('semester', semester)
+        .eq('type', type)
+        .eq('type_index', index)
+        .maybeSingle();
+
+    String evaluationId;
+
+    if (existingEval != null) {
+      evaluationId = existingEval['id'];
+    } else {
+      // Création
+      final newEval = await client
+          .from('evaluations')
+          .insert({
+            'title': title,
+            'date': DateTime.now().toIso8601String(),
+            'semester': semester,
+            'type': type,
+            'type_index': index,
+            'class_id': classId,
+            'subject_id': subjectId,
+            'created_by': user.id,
+          })
+          .select('id')
+          .single();
+      evaluationId = newEval['id'];
+    }
+
+    // 2. Préparer les notes avec l'ID de l'évaluation
+    final gradesToInsert = grades.map((g) {
+      return {
+        'evaluation_id': evaluationId,
+        'student_id': g['student_id'],
+        'note': g['note'], // Renamed 'score' -> 'note'
+        'is_absent': g['is_absent'],
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+    }).toList();
+
+    // 3. Upsert des notes
+    if (gradesToInsert.isNotEmpty) {
+      await client
+          .from('grades')
+          .upsert(
+            gradesToInsert,
+            onConflict: 'evaluation_id, student_id', // Unique key
+          );
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> fetchAllEvaluations() async {
     final user = client.auth.currentUser;
     if (user == null) return [];
@@ -125,17 +227,29 @@ class SupabaseService {
         .eq('subject_id', subjectId);
   }
 
-  static Future<void> saveGrade(Map<String, dynamic> gradeData) async {
-    await client.from('grades').upsert(gradeData);
-  }
-
   static Future<List<Map<String, dynamic>>> fetchGradesForEvaluation(
     String evaluationId,
   ) async {
-    return await client
+    final response = await client
         .from('grades')
         .select('*')
         .eq('evaluation_id', evaluationId);
+
+    // Mapper 'note' -> 'score' si besoin pour compatibilité locale ou renvoyer tel quel
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchStudentPerformance({
+    required int classId,
+    required int subjectId,
+    required int semester,
+  }) async {
+    return await client
+        .from('view_student_subject_performance')
+        .select('*')
+        .eq('class_id', classId)
+        .eq('subject_id', subjectId)
+        .eq('semester', semester);
   }
 
   static Future<List<Map<String, dynamic>>> fetchClassPerformance(

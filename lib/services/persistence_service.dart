@@ -5,7 +5,7 @@ import '../models/school_data.dart';
 class PersistenceService {
   static const String keyClasses = 'cached_classes';
   static const String keySettings = 'cached_settings';
-  static const String keyPendingGrades = 'pending_grades';
+  static const String keyPendingEvaluations = 'pending_evaluations';
 
   static Future<void> saveClasses(List<SchoolClass> classes) async {
     final prefs = await SharedPreferences.getInstance();
@@ -56,25 +56,25 @@ class PersistenceService {
     return jsonDecode(data) as Map<String, dynamic>;
   }
 
-  // --- Gestion de la file d'attente des notes ---
+  // --- Gestion de la file d'attente des évaluations (Synchronisation V2) ---
 
-  static Future<void> addPendingGrade(Map<String, dynamic> grade) async {
+  static Future<void> addPendingEvaluation(Map<String, dynamic> eval) async {
     final prefs = await SharedPreferences.getInstance();
-    final List<Map<String, dynamic>> pending = await loadPendingGrades();
-    pending.add(grade);
-    await prefs.setString(keyPendingGrades, jsonEncode(pending));
+    final List<Map<String, dynamic>> pending = await loadPendingEvaluations();
+    pending.add(eval);
+    await prefs.setString(keyPendingEvaluations, jsonEncode(pending));
   }
 
-  static Future<List<Map<String, dynamic>>> loadPendingGrades() async {
+  static Future<List<Map<String, dynamic>>> loadPendingEvaluations() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? data = prefs.getString(keyPendingGrades);
+    final String? data = prefs.getString(keyPendingEvaluations);
     if (data == null) return [];
     final List<dynamic> list = jsonDecode(data);
     return list.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
-  static Future<void> clearPendingGrades() async {
+  static Future<void> clearPendingEvaluations() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(keyPendingGrades);
+    await prefs.remove(keyPendingEvaluations);
   }
 }

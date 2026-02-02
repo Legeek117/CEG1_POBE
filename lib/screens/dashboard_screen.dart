@@ -40,7 +40,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     _isOnline = await SupabaseService.isOnline();
-    _pendingCount = (await PersistenceService.loadPendingGrades()).length;
+    _pendingCount = (await PersistenceService.loadPendingEvaluations()).length;
 
     try {
       if (_isOnline) {
@@ -50,6 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           MockData.teacherName = profile['full_name'];
           MockData.teacherEmail = profile['email'];
           MockData.isPrincipalTeacher = profile['is_pp'] ?? false;
+          MockData.managedClassId = profile['managed_class_id']?.toString();
         }
 
         // 2. Charger les paramètres globaux
@@ -59,10 +60,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         // CORRECTION CRITIQUE : Remplir la liste des semestres débloqués
         MockData.unlockedSemesters = [];
-        if (settings['is_semester1_locked'] == false)
+        if (settings['is_semester1_locked'] != true) {
           MockData.unlockedSemesters.add(1);
-        if (settings['is_semester2_locked'] == false)
+        }
+        if (settings['is_semester2_locked'] != true) {
           MockData.unlockedSemesters.add(2);
+        }
 
         await PersistenceService.saveSettings(settings);
 
@@ -82,19 +85,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
         MockData.classes = classes;
         await PersistenceService.saveClasses(classes);
 
-        // 4. Charger les verrous du censeur
+        // 4. Charger les verrous du censeur (V2 : 'Interrogation', 'Devoir')
         final locks = await SupabaseService.fetchCensorUnlocks();
         MockData.unlockedEvaluations = {'Interrogation': [], 'Devoir': []};
         for (var lock in locks) {
-          final type = lock['type'] == 'INTERRO' ? 'Interrogation' : 'Devoir';
-          final index = lock['index'];
-          if (lock['is_unlocked']) {
-            MockData.unlockedEvaluations[type]!.add(index);
+          final type = lock['type'].toString();
+          if (MockData.unlockedEvaluations.containsKey(type)) {
+            if (lock['is_unlocked']) {
+              MockData.unlockedEvaluations[type]!.add(lock['index']);
+            }
           }
         }
       } else {
         // MODE HORS-LIGNE : Charger depuis le cache
         MockData.classes = await PersistenceService.loadClasses();
+        final pending = await PersistenceService.loadPendingEvaluations();
+        if (mounted) setState(() => _pendingCount = pending.length);
         final settings = await PersistenceService.loadSettings();
         if (settings != null) {
           MockData.isAcademicYearActive = settings['is_active'];

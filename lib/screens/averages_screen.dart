@@ -20,6 +20,7 @@ class AveragesScreen extends StatefulWidget {
 class _AveragesScreenState extends State<AveragesScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _performanceData = [];
+  int _selectedSemester = 1;
 
   @override
   void initState() {
@@ -30,8 +31,10 @@ class _AveragesScreenState extends State<AveragesScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final data = await SupabaseService.fetchClassPerformance(
-        int.parse(widget.schoolClass.id),
+      final data = await SupabaseService.fetchStudentPerformance(
+        classId: int.parse(widget.schoolClass.id),
+        subjectId: widget.schoolClass.subjectId!,
+        semester: _selectedSemester,
       );
       setState(() {
         _performanceData = data;
@@ -57,6 +60,7 @@ class _AveragesScreenState extends State<AveragesScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                _buildSemesterSelector(),
                 _buildInfoCard(),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -121,8 +125,13 @@ class _AveragesScreenState extends State<AveragesScreen> {
                           '${item['first_name']} ${item['last_name']}';
                       final interroAvg =
                           (item['interro_avg'] as num?)?.toDouble() ?? 0.0;
-                      final subjectAvg =
-                          (item['subject_avg'] as num?)?.toDouble() ?? 0.0;
+
+                      // Calcul de la moyenne de matière (V2)
+                      // Formule : (MoyInterro + Devoir1 + Devoir2) / 3
+                      final d1 = (item['devoir1'] as num?)?.toDouble() ?? 0.0;
+                      final d2 = (item['devoir2'] as num?)?.toDouble() ?? 0.0;
+
+                      final subjectAvg = (interroAvg + d1 + d2) / 3;
                       final weightedAvg = subjectAvg * widget.schoolClass.coeff;
 
                       return _buildStudentRow(
@@ -137,6 +146,64 @@ class _AveragesScreenState extends State<AveragesScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildSemesterSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: Colors.white,
+      child: Row(
+        children: [
+          const Text(
+            'SEMESTRE',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Row(
+              children: [1, 2].map((sem) {
+                final isSelected = _selectedSemester == sem;
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: sem == 1 ? 8 : 0),
+                    child: InkWell(
+                      onTap: () {
+                        setState(() => _selectedSemester = sem);
+                        _loadData();
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppTheme.primaryBlue
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'S$sem',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black87,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

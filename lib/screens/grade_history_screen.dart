@@ -42,8 +42,8 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
             id: e['id'].toString(),
             title: e['title'],
             date: DateTime.parse(e['date']),
-            semestre: e['semestre'],
-            type: e['type'] == 'INTERRO' ? 'Interrogation' : 'Devoir',
+            semestre: e['semester'], // V2: semester
+            type: e['type'], // V2: déjà 'Interrogation' ou 'Devoir'
             typeIndex: e['type_index'],
           );
         }).toList();

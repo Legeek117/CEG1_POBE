@@ -5,7 +5,12 @@ import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
-  const LoginScreen({super.key, required this.onLoginSuccess});
+  final VoidCallback onRegister;
+  const LoginScreen({
+    super.key,
+    required this.onLoginSuccess,
+    required this.onRegister,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -31,6 +36,24 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await SupabaseService.signIn(email, password);
+
+      // Vérifier si le compte est approuvé
+      final profile = await SupabaseService.fetchCurrentProfile();
+      if (profile != null && profile['is_approved'] == false) {
+        await SupabaseService.signOut();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Votre compte est en attente d\'approbation par le censeur.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+
       if (!mounted) return;
       widget.onLoginSuccess();
     } on AuthException catch (e) {
@@ -140,9 +163,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(color: Colors.grey),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: widget.onRegister,
                   child: const Text(
-                    'CONTACTER LE CENSEUR',
+                    'CRÉER UN COMPTE',
                     style: TextStyle(
                       color: AppTheme.primaryBlue,
                       fontWeight: FontWeight.bold,

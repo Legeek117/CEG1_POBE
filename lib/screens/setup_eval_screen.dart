@@ -7,7 +7,13 @@ import '../services/supabase_service.dart';
 class SetupEvalScreen extends StatefulWidget {
   final SchoolClass schoolClass;
   final VoidCallback onBack;
-  final Function(String subject, int semester, String type, int index)
+  final Function(
+    String subject,
+    int semester,
+    String type,
+    int index,
+    String title,
+  )
   onContinue;
 
   const SetupEvalScreen({
@@ -27,6 +33,13 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
   String? selectedMatiere;
   int typeIndex = 1;
   bool _isLoading = false;
+  final TextEditingController _titleController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -57,6 +70,9 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
         selectedSemestre,
         selectedType,
         typeIndex,
+        _titleController.text.isNotEmpty
+            ? _titleController.text
+            : "Évaluation $selectedType $typeIndex",
       );
     } catch (e) {
       if (mounted) {
@@ -127,7 +143,8 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
             const Text('DÉTAILS', style: _sectionStyle),
             const SizedBox(height: 12),
             TextField(
-              decoration: InputDecoration(
+              controller: _titleController,
+              decoration: const InputDecoration(
                 labelText: 'Titre de l\'épreuve',
                 hintText: 'Ex: Calcul rapide, Dictée...',
               ),

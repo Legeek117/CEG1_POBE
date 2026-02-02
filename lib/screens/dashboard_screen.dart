@@ -56,6 +56,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final settings = await SupabaseService.fetchGlobalSettings();
         MockData.isAcademicYearActive = settings['is_active'];
         MockData.currentAcademicYear = settings['name'];
+
+        // CORRECTION CRITIQUE : Remplir la liste des semestres débloqués
+        MockData.unlockedSemesters = [];
+        if (settings['is_semester1_locked'] == false)
+          MockData.unlockedSemesters.add(1);
+        if (settings['is_semester2_locked'] == false)
+          MockData.unlockedSemesters.add(2);
+
         await PersistenceService.saveSettings(settings);
 
         // 3. Charger les classes assignées

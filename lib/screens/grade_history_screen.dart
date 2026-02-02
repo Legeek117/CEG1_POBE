@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
-import '../mock_data.dart';
+import '../app_state.dart';
 import '../models/school_data.dart';
 import 'package:intl/intl.dart';
 import '../services/supabase_service.dart';
@@ -63,7 +63,7 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
 
     // Filtre global : Uniquement les semestres débloqués par le censeur
     List<Evaluation> filteredEvaluations = _evaluations
-        .where((e) => MockData.unlockedSemesters.contains(e.semestre))
+        .where((e) => AppState.unlockedSemesters.contains(e.semestre))
         .toList();
 
     if (selectedFilter == 'Semestre 1') {
@@ -95,7 +95,7 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
       body: Column(
         children: [
           _buildFilterBar(),
-          if (MockData.unlockedSemesters.length < 2) _buildLockedWarning(),
+          if (AppState.unlockedSemesters.length < 2) _buildLockedWarning(),
           Expanded(
             child: filteredEvaluations.isEmpty
                 ? _buildEmptyState()
@@ -230,7 +230,7 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
     final locked = [
       1,
       2,
-    ].where((s) => !MockData.unlockedSemesters.contains(s)).toList();
+    ].where((s) => !AppState.unlockedSemesters.contains(s)).toList();
     if (locked.isEmpty) return const SizedBox.shrink();
 
     return Container(

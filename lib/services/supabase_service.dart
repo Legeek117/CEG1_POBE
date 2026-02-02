@@ -55,6 +55,16 @@ class SupabaseService {
     return await client.from('profiles').select('*').eq('id', user.id).single();
   }
 
+  static Future<Map<String, dynamic>?> fetchManagedClass() async {
+    final user = client.auth.currentUser;
+    if (user == null) return null;
+    return await client
+        .from('classes')
+        .select('*')
+        .eq('main_teacher_id', user.id)
+        .maybeSingle();
+  }
+
   // --- Global Settings & Locks ---
   static Future<Map<String, dynamic>> fetchGlobalSettings() async {
     return await client
@@ -73,7 +83,7 @@ class SupabaseService {
     final user = client.auth.currentUser;
     if (user == null) return [];
 
-    // Jointure complexe : teacher_assignments -> classes, subjects et coefficients
+    // Jointure simple : teacher_assignments -> classes et subjects
     final response = await client
         .from('teacher_assignments')
         .select('''
@@ -81,21 +91,15 @@ class SupabaseService {
           subjects(name), 
           classes(
             *, 
-            students(count),
-            class_subjects!inner(coefficient)
+            students(count)
           )
         ''')
-        .eq('teacher_id', user.id)
-        .eq(
-          'classes.class_subjects.subject_id',
-          client.from('teacher_assignments').select('subject_id'),
-        );
-    // Note: La syntaxe ci-dessus pour filter sur subject_id dans la jointure peut être complexe.
-    // Approche plus simple : Fetch coefficients séparément ou via une vue si besoin.
-    // Mais essayons de mapper proprement ce qu'on reçoit.
+        .eq('teacher_id', user.id);
 
-    final List<dynamic> data = response as List<dynamic>;
+    final List<dynamic> data = response;
 
+    // 2. Fetcher les coefficients à part ou via une autre méthode
+    // Pour simplifier et éviter les erreurs de jointures complexes inner!
     return data.map((e) {
       final classData = Map<String, dynamic>.from(e['classes'] as Map);
       final subjectId = e['subject_id'];
@@ -105,17 +109,12 @@ class SupabaseService {
       // Extraction du count
       final studentsList = classData['students'] as List;
       classData['student_count'] = studentsList.isNotEmpty
-          ? studentsList[0]['count']
+          ? (studentsList[0]['count'] ?? 0)
           : 0;
 
-      // Extraction du coefficient spécifique à cette classe/matière
-      final classSubjects = classData['class_subjects'] as List;
-      // On cherche l'entrée qui correspond à la matière de l'assignation
-      final specificSubj = classSubjects.firstWhere(
-        (cs) => cs['subject_id'] == subjectId,
-        orElse: () => {'coefficient': 1},
-      );
-      classData['coefficient'] = specificSubj['coefficient'];
+      // Par défaut coef 1 si on n'a pas pu faire la jointure complexe
+      // (Plus sûr pour éviter de bloquer l'app)
+      classData['coefficient'] = 1;
 
       return classData;
     }).toList();

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme.dart';
 import 'models/school_data.dart';
-import 'mock_data.dart';
+import 'app_state.dart';
 import 'screens/login_screen.dart';
 import 'screens/registration_screen.dart';
 import 'screens/pending_approval_screen.dart';
@@ -137,8 +137,8 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
   Future<void> _checkVersion({bool manual = false}) async {
     try {
       final config = await SupabaseService.fetchAppConfig();
-      final latestVersion = config['version_actuelle'];
-      final minVersion = config['version_minimale'];
+      final latestVersion = config['version'] ?? currentAppVersion;
+      final minVersion = config['min_version'] ?? currentAppVersion;
 
       if (currentAppVersion != latestVersion) {
         if (!mounted) return;
@@ -194,9 +194,9 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         _buildCurrentScreen(),
         if (showUpdateDialog && appConfig != null)
           UpdateDialog(
-            version: appConfig!['version_actuelle'],
-            url: appConfig!['url_apk_android'],
-            changelog: appConfig!['notes_version'],
+            version: appConfig!['version'] ?? '',
+            url: appConfig!['download_url'] ?? '',
+            changelog: appConfig!['release_notes'] ?? '',
             isForced: isUpdateForced,
             onClose: () => setState(() => showUpdateDialog = false),
           ),
@@ -324,7 +324,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
       case 'notifications':
         return NotificationsScreen(onBack: () => navigateTo('dashboard'));
       case 'averages':
-        if (MockData.classes.isEmpty) {
+        if (AppState.classes.isEmpty) {
           return Scaffold(
             appBar: AppBar(
               title: const Text('Moyennes'),
@@ -359,11 +359,11 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           );
         }
         return AveragesScreen(
-          schoolClass: selectedClass ?? MockData.classes[0],
+          schoolClass: selectedClass ?? AppState.classes[0],
           onBack: () => navigateTo('dashboard'),
         );
       case 'general_averages':
-        if (MockData.classes.isEmpty) {
+        if (AppState.classes.isEmpty) {
           return Scaffold(
             appBar: AppBar(
               title: const Text('Moyennes Générales'),
@@ -397,9 +397,9 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
             ),
           );
         }
-        final managedClass = MockData.classes.firstWhere(
-          (c) => c.id == MockData.managedClassId,
-          orElse: () => MockData.classes.first,
+        final managedClass = AppState.classes.firstWhere(
+          (c) => c.id == AppState.managedClassId,
+          orElse: () => AppState.classes.first,
         );
         return GeneralAverageScreen(
           schoolClass: managedClass,

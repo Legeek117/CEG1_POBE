@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
-import '../mock_data.dart';
+import '../app_state.dart';
 import '../theme.dart';
 import '../services/grade_calculator.dart';
 import '../services/supabase_service.dart';
@@ -33,7 +33,7 @@ class GradingScreen extends StatefulWidget {
 }
 
 class _GradingScreenState extends State<GradingScreen> {
-  final List<Student> students = List.from(MockData.students);
+  final List<Student> students = List.from(AppState.students);
   String searchQuery = "";
   bool _isSaving = false;
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme.dart';
-import '../mock_data.dart';
+import '../app_state.dart';
 
 class SettingsScreen extends StatelessWidget {
   final VoidCallback onBack;
@@ -214,14 +214,14 @@ class SettingsScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    MockData.teacherName,
+                    AppState.teacherName,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   Text(
-                    MockData.teacherEmail,
+                    AppState.teacherEmail,
                     style: const TextStyle(color: Colors.grey, fontSize: 13),
                   ),
                 ],

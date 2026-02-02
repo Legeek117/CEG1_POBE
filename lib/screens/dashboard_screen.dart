@@ -1,7 +1,7 @@
 import '../services/supabase_service.dart';
 import '../services/persistence_service.dart';
 import '../models/school_data.dart';
-import '../mock_data.dart';
+import '../app_state.dart';
 import '../theme.dart';
 import 'package:flutter/material.dart';
 
@@ -44,30 +44,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       if (_isOnline) {
-        // 1. Charger le profil
-        final profile = await SupabaseService.fetchCurrentProfile();
-        if (profile != null) {
-          MockData.teacherName = profile['full_name'];
-          MockData.teacherEmail = profile['email'];
-          MockData.isPrincipalTeacher = profile['is_pp'] ?? false;
-          MockData.managedClassId = profile['managed_class_id']?.toString();
-        }
-
-        // 2. Charger les paramètres globaux
+        // 1. Charger les paramètres globaux
         final settings = await SupabaseService.fetchGlobalSettings();
-        MockData.isAcademicYearActive = settings['is_active'];
-        MockData.currentAcademicYear = settings['name'];
+        AppState.isAcademicYearActive = settings['is_active'];
+        AppState.currentAcademicYear = settings['name'];
 
         // CORRECTION CRITIQUE : Remplir la liste des semestres débloqués
-        MockData.unlockedSemesters = [];
+        AppState.unlockedSemesters = [];
         if (settings['is_semester1_locked'] != true) {
-          MockData.unlockedSemesters.add(1);
+          AppState.unlockedSemesters.add(1);
         }
         if (settings['is_semester2_locked'] != true) {
-          MockData.unlockedSemesters.add(2);
+          AppState.unlockedSemesters.add(2);
         }
 
         await PersistenceService.saveSettings(settings);
+
+        // 2. Charger le profil
+        final profile = await SupabaseService.fetchCurrentProfile();
+        if (profile != null) {
+          await PersistenceService.saveProfile(profile); // Mettre en cache
+          AppState.teacherName = profile['full_name'] ?? 'Professeur';
+          AppState.teacherEmail = profile['email'] ?? '';
+        }
+
+        // 2.5 Détecter si PP
+        final managedClass = await SupabaseService.fetchManagedClass();
+        if (managedClass != null) {
+          AppState.isPrincipalTeacher = true;
+          AppState.managedClassId = managedClass['id'].toString();
+        } else {
+          AppState.isPrincipalTeacher = false;
+          AppState.managedClassId = null;
+        }
 
         // 3. Charger les classes assignées
         final fetchedClassesData = await SupabaseService.fetchTeacherClasses();
@@ -82,29 +91,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         }).toList();
 
-        MockData.classes = classes;
+        AppState.classes = classes;
         await PersistenceService.saveClasses(classes);
 
         // 4. Charger les verrous du censeur (V2 : 'Interrogation', 'Devoir')
         final locks = await SupabaseService.fetchCensorUnlocks();
-        MockData.unlockedEvaluations = {'Interrogation': [], 'Devoir': []};
+        AppState.unlockedEvaluations = {'Interrogation': [], 'Devoir': []};
         for (var lock in locks) {
           final type = lock['type'].toString();
-          if (MockData.unlockedEvaluations.containsKey(type)) {
-            if (lock['is_unlocked']) {
-              MockData.unlockedEvaluations[type]!.add(lock['index']);
+          if (AppState.unlockedEvaluations.containsKey(type)) {
+            if (lock['is_unlocked'] == true) {
+              AppState.unlockedEvaluations[type]!.add({
+                'index': lock['index'],
+                'start_date': lock['start_date'],
+                'end_date': lock['end_date'],
+              });
             }
           }
         }
       } else {
         // MODE HORS-LIGNE : Charger depuis le cache
-        MockData.classes = await PersistenceService.loadClasses();
+        final cachedProfile = await PersistenceService.loadProfile();
+        if (cachedProfile != null) {
+          AppState.teacherName = cachedProfile['full_name'] ?? 'Professeur';
+          AppState.teacherEmail = cachedProfile['email'] ?? '';
+        }
+
+        AppState.classes = await PersistenceService.loadClasses();
         final pending = await PersistenceService.loadPendingEvaluations();
         if (mounted) setState(() => _pendingCount = pending.length);
         final settings = await PersistenceService.loadSettings();
         if (settings != null) {
-          MockData.isAcademicYearActive = settings['is_active'];
-          MockData.currentAcademicYear = settings['name'];
+          AppState.isAcademicYearActive = settings['is_active'];
+          AppState.currentAcademicYear = settings['name'];
         }
       }
     } catch (e) {
@@ -165,8 +184,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         children: [
           UserAccountsDrawerHeader(
-            accountName: Text(MockData.teacherName),
-            accountEmail: Text(MockData.teacherEmail),
+            accountName: Text(AppState.teacherName),
+            accountEmail: Text(AppState.teacherEmail),
             currentAccountPicture: CircleAvatar(
               backgroundColor: Colors.white,
               child: ClipOval(child: Image.asset('assets/images/logo.png')),
@@ -203,25 +222,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
               widget.onNavigate('settings');
             },
           ),
-          if (MockData.isPrincipalTeacher) ...[
+          if (AppState.isPrincipalTeacher) ...[
             ListTile(
               leading: Icon(
-                MockData.isSessionUnlocked
+                AppState.isSessionUnlocked
                     ? Icons.calculate_outlined
                     : Icons.lock_outline,
-                color: MockData.isSessionUnlocked ? null : Colors.grey,
+                color: AppState.isSessionUnlocked ? null : Colors.grey,
               ),
               title: Text(
                 'Session de calcul MG',
                 style: TextStyle(
-                  color: MockData.isSessionUnlocked ? null : Colors.grey,
+                  color: AppState.isSessionUnlocked ? null : Colors.grey,
                 ),
               ),
-              trailing: MockData.isSessionUnlocked
+              trailing: AppState.isSessionUnlocked
                   ? null
                   : const Icon(Icons.lock, size: 16, color: Colors.grey),
               onTap: () {
-                if (MockData.isSessionUnlocked) {
+                if (AppState.isSessionUnlocked) {
                   Navigator.pop(context);
                   widget.onNavigate('general_averages');
                 } else {
@@ -264,7 +283,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Bonjour, ${MockData.teacherName}',
+              'Bonjour, ${AppState.teacherName}',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 24,
@@ -273,15 +292,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              MockData.isAcademicYearActive
+              AppState.isAcademicYearActive
                   ? 'Bienvenue dans votre espace de gestion.'
-                  : 'ANNÉE SCOLAIRE ${MockData.currentAcademicYear} TERMINÉE',
+                  : 'ANNÉE SCOLAIRE ${AppState.currentAcademicYear} TERMINÉE',
               style: TextStyle(
-                color: MockData.isAcademicYearActive
+                color: AppState.isAcademicYearActive
                     ? Colors.white70
                     : Colors.red.shade100,
                 fontSize: 14,
-                fontWeight: MockData.isAcademicYearActive
+                fontWeight: AppState.isAcademicYearActive
                     ? FontWeight.normal
                     : FontWeight.bold,
               ),
@@ -385,7 +404,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildClassesList() {
-    if (!MockData.isAcademicYearActive) {
+    if (!AppState.isAcademicYearActive) {
       return SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 80),
@@ -409,7 +428,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'En attente du démarrage de l\'année ${MockData.currentAcademicYear}\npar le censeur.',
+                  'En attente du démarrage de l\'année ${AppState.currentAcademicYear}\npar le censeur.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.grey),
                 ),
@@ -424,7 +443,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate((context, index) {
-          final schoolClass = MockData.classes[index];
+          final schoolClass = AppState.classes[index];
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Card(
@@ -518,7 +537,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           );
-        }, childCount: MockData.classes.length),
+        }, childCount: AppState.classes.length),
       ),
     );
   }

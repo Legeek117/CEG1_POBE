@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
-import '../mock_data.dart';
+import '../app_state.dart';
 import '../theme.dart';
 import '../services/supabase_service.dart';
+import '../services/persistence_service.dart';
 
 class SetupEvalScreen extends StatefulWidget {
   final SchoolClass schoolClass;
@@ -52,11 +53,33 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
   void _handleContinue() async {
     setState(() => _isLoading = true);
     try {
-      final studentData = await SupabaseService.fetchStudentsInClass(
-        int.parse(widget.schoolClass.id),
-      );
+      final isOnline = await SupabaseService.isOnline();
+      List<Map<String, dynamic>> studentData;
 
-      MockData.students = studentData.map((s) {
+      if (isOnline) {
+        studentData = await SupabaseService.fetchStudentsInClass(
+          int.parse(widget.schoolClass.id),
+        );
+        // Mettre à jour le cache au passage
+        await PersistenceService.saveStudents(
+          int.parse(widget.schoolClass.id),
+          studentData,
+        );
+      } else {
+        studentData = await PersistenceService.loadStudents(
+          int.parse(widget.schoolClass.id),
+        );
+      }
+
+      if (studentData.isEmpty) {
+        throw Exception(
+          isOnline
+              ? 'Aucun élève trouvé dans cette classe'
+              : 'Données hors-ligne indisponibles pour cette classe. Veuillez synchroniser avec internet.',
+        );
+      }
+
+      AppState.students = studentData.map((s) {
         return Student(
           id: s['id'].toString(),
           matricule: s['matricule'],
@@ -274,7 +297,7 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
       children: ['Interrogation', 'Devoir'].map((t) {
         final isSelected = selectedType == t;
         final isTypeUnlocked =
-            MockData.unlockedEvaluations[t]?.isNotEmpty ?? false;
+            AppState.unlockedEvaluations[t]?.isNotEmpty ?? false;
 
         return Expanded(
           child: Padding(
@@ -350,8 +373,12 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
     return DropdownButtonFormField<int>(
       initialValue: typeIndex > maxIndex ? 1 : typeIndex,
       items: List.generate(maxIndex, (i) => i + 1).map((v) {
-        final isUnlocked =
-            MockData.unlockedEvaluations[selectedType]?.contains(v) ?? false;
+        final lockInfo = AppState.unlockedEvaluations[selectedType]?.firstWhere(
+          (l) => l['index'] == v,
+          orElse: () => {},
+        );
+        final isUnlocked = lockInfo != null && lockInfo.isNotEmpty;
+
         return DropdownMenuItem(
           value: v,
           enabled: isUnlocked,
@@ -378,9 +405,33 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
   bool _isSelectionAllowed() {
     if (selectedMatiere == null) return false;
     // Vérifie si le semestre est débloqué
-    if (!MockData.unlockedSemesters.contains(selectedSemestre)) return false;
+    if (!AppState.unlockedSemesters.contains(selectedSemestre)) return false;
+
     // Vérifie si l'évaluation spécifique est débloquée
-    return MockData.unlockedEvaluations[selectedType]?.contains(typeIndex) ??
-        false;
+    final locks = AppState.unlockedEvaluations[selectedType];
+    if (locks == null) return false;
+
+    final lock = locks.firstWhere(
+      (l) => l['index'] == typeIndex,
+      orElse: () => {},
+    );
+
+    if (lock.isEmpty) return false;
+
+    // Vérification des dates (si présentes)
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    if (lock['start_date'] != null) {
+      final start = DateTime.parse(lock['start_date']);
+      if (today.isBefore(start)) return false;
+    }
+
+    if (lock['end_date'] != null) {
+      final end = DateTime.parse(lock['end_date']);
+      if (today.isAfter(end)) return false;
+    }
+
+    return true;
   }
 }

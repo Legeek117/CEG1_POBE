@@ -34,6 +34,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    final isOnline = await SupabaseService.isOnline();
+    if (!isOnline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Connexion internet requise pour se connecter au serveur.',
+            ),
+          ),
+        );
+        setState(() => _isLoading = false);
+      }
+      return;
+    }
+
     try {
       await SupabaseService.signIn(email, password);
 

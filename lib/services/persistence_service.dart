@@ -5,7 +5,20 @@ import '../models/school_data.dart';
 class PersistenceService {
   static const String keyClasses = 'cached_classes';
   static const String keySettings = 'cached_settings';
+  static const String keyProfile = 'cached_profile';
   static const String keyPendingEvaluations = 'pending_evaluations';
+
+  static Future<void> saveProfile(Map<String, dynamic> profile) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(keyProfile, jsonEncode(profile));
+  }
+
+  static Future<Map<String, dynamic>?> loadProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? data = prefs.getString(keyProfile);
+    if (data == null) return null;
+    return jsonDecode(data) as Map<String, dynamic>;
+  }
 
   static Future<void> saveClasses(List<SchoolClass> classes) async {
     final prefs = await SharedPreferences.getInstance();
@@ -76,5 +89,18 @@ class PersistenceService {
   static Future<void> clearPendingEvaluations() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(keyPendingEvaluations);
+  }
+
+  static Future<void> saveStudents(int classId, List<dynamic> students) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('students_$classId', jsonEncode(students));
+  }
+
+  static Future<List<Map<String, dynamic>>> loadStudents(int classId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? data = prefs.getString('students_$classId');
+    if (data == null) return [];
+    final List<dynamic> list = jsonDecode(data);
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 }

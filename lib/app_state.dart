@@ -1,7 +1,7 @@
 import 'models/school_data.dart';
 
-class MockData {
-  // Ces listes seront peuplées par SupabaseService au démarrage
+class AppState {
+  // Ces listes sont peuplées par SupabaseService au démarrage ou lors du sync
   static List<SchoolClass> classes = [];
   static List<Student> students = [];
 
@@ -16,7 +16,9 @@ class MockData {
   static bool isAcademicYearActive = true;
   static String currentAcademicYear = "";
   static List<int> unlockedSemesters = [];
-  static Map<String, List<int>> unlockedEvaluations = {
+
+  // Stocke les détails des verrous (index, start_date, end_date)
+  static Map<String, List<Map<String, dynamic>>> unlockedEvaluations = {
     'Interrogation': [],
     'Devoir': [],
   };

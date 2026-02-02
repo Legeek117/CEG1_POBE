@@ -91,6 +91,16 @@ class _SyncScreenState extends State<SyncScreen> {
           )
           .toList();
       await PersistenceService.saveClasses(classes);
+      _updateProgress(0.7);
+
+      _addLog('Mise en cache des listes d\'élèves...');
+      for (int i = 0; i < classes.length; i++) {
+        final classId = int.parse(classes[i].id);
+        _addLog('Chargement élèves : ${classes[i].name}...');
+        final students = await SupabaseService.fetchStudentsInClass(classId);
+        await PersistenceService.saveStudents(classId, students);
+        _updateProgress(0.7 + (0.1 * (i + 1) / classes.length));
+      }
       _updateProgress(0.8);
 
       _addLog('Réception des paramètres de l\'année scolaire...');

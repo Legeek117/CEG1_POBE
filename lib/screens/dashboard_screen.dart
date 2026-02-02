@@ -108,9 +108,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
     } catch (e) {
-      debugPrint(
-        'Erreur chargement données (mode ${_isOnline ? "online" : "offline"}): $e',
-      );
+      debugPrint('Erreur chargement Dashboard: $e'); // Log technique pour debug
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Impossible de charger les données. Vérifiez votre connexion',
+            ),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

@@ -58,21 +58,35 @@ class _LoginScreenState extends State<LoginScreen> {
       widget.onLoginSuccess();
     } on AuthException catch (e) {
       if (!mounted) return;
-      String message = 'Une erreur est survenue';
+      String message = 'Impossible de se connecter';
+
       if (e.message.contains('Invalid login credentials') ||
-          e.code == 'invalid_credentials') {
+          e.code == 'invalid_credentials' ||
+          e.message.contains('Invalid')) {
         message = 'Email ou mot de passe incorrect';
-      } else {
-        message = e.message;
+      } else if (e.message.contains('Email not confirmed')) {
+        message = 'Veuillez confirmer votre email avant de vous connecter';
+      } else if (e.message.contains('Too many requests')) {
+        message = 'Trop de tentatives. Réessayez dans quelques minutes';
       }
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
     } catch (e) {
       if (!mounted) return;
+      String message = 'Une erreur est survenue';
+
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('network') || errorStr.contains('connection')) {
+        message = 'Erreur de connexion. Vérifiez votre internet';
+      } else if (errorStr.contains('timeout')) {
+        message = 'La connexion a pris trop de temps. Réessayez';
+      }
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Erreur : ${e.toString()}')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

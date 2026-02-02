@@ -56,9 +56,22 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       widget.onSuccess();
     } catch (e) {
       if (!mounted) return;
+      String errorMessage = 'Impossible de modifier le mot de passe';
+
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('same') || errorStr.contains('same_password')) {
+        errorMessage =
+            'Le nouveau mot de passe doit être différent de l\'ancien';
+      } else if (errorStr.contains('weak') || errorStr.contains('short')) {
+        errorMessage = 'Le mot de passe doit contenir au moins 6 caractères';
+      } else if (errorStr.contains('network') ||
+          errorStr.contains('connection')) {
+        errorMessage = 'Erreur de connexion. Vérifiez votre internet';
+      }
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Erreur : ${e.toString()}')));
+      ).showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

@@ -120,11 +120,25 @@ class _GradingScreenState extends State<GradingScreen> {
         widget.onSubmit();
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur lors de la sauvegarde : $e')),
-        );
+      if (!mounted) return;
+      String errorMessage = 'Impossible de sauvegarder les notes';
+
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('network') || errorStr.contains('connection')) {
+        errorMessage =
+            'Erreur de connexion. Les notes seront sauvegardées hors-ligne';
+      } else if (errorStr.contains('permission') ||
+          errorStr.contains('policy')) {
+        errorMessage = 'Vous n\'avez pas la permission de modifier ces notes';
+      } else if (errorStr.contains('duplicate') ||
+          errorStr.contains('already exists')) {
+        errorMessage = 'Ces notes ont déjà été enregistrées';
       }
+
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }

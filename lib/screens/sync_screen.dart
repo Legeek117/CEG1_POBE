@@ -104,7 +104,18 @@ class _SyncScreenState extends State<SyncScreen> {
       await Future.delayed(const Duration(seconds: 1));
       widget.onFinish();
     } catch (e) {
-      _addLog('❌ ERREUR CRITIQUE : $e');
+      String errorMessage = 'Erreur lors de la synchronisation';
+
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('network') || errorStr.contains('connection')) {
+        errorMessage = 'Pas de connexion internet';
+      } else if (errorStr.contains('permission')) {
+        errorMessage = 'Permission refusée';
+      } else if (errorStr.contains('timeout')) {
+        errorMessage = 'Délai d\'attente dépassé';
+      }
+
+      _addLog('❌ ERREUR : $errorMessage');
       await Future.delayed(const Duration(seconds: 3));
       widget.onFinish();
     }

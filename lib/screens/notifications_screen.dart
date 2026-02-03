@@ -65,12 +65,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
                 return _buildNotificationTile(
                   title: item['title'] ?? 'Notification',
-                  subtitle: item['content'] ?? '',
+                  subtitle: item['body'] ?? '',
                   time: timeStr,
                   type: item['type'] ?? 'INFO',
+                  onTap: () => _showNotificationDetail(item),
                 );
               },
             ),
+    );
+  }
+
+  void _showNotificationDetail(Map<String, dynamic> item) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(item['title'] ?? 'Notification'),
+        content: Text(item['body'] ?? ''),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -94,6 +111,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     required String subtitle,
     required String time,
     required String type,
+    required VoidCallback onTap,
   }) {
     IconData icon;
     Color color;
@@ -124,6 +142,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         border: Border.all(color: Colors.grey.shade100),
       ),
       child: ListTile(
+        onTap: onTap,
         contentPadding: const EdgeInsets.all(16),
         leading: Container(
           padding: const EdgeInsets.all(10),
@@ -156,6 +175,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           padding: const EdgeInsets.only(top: 8),
           child: Text(
             subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 13,
               color: Colors.black54,

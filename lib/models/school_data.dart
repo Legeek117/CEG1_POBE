@@ -22,8 +22,11 @@ class SchoolClass {
   final int studentCount;
   final String lastEntryDate;
   final List<String> matieres;
-  final int? subjectId; // Nouvel ID réel de la BDD
+  final int? subjectId;
   final int coeff;
+  final int? cycle; // 1 or 2
+  final String? level; // 6ème, 3ème, etc.
+  final String? mainTeacherName;
 
   SchoolClass({
     required this.id,
@@ -33,6 +36,9 @@ class SchoolClass {
     required this.matieres,
     this.subjectId,
     this.coeff = 1,
+    this.cycle,
+    this.level,
+    this.mainTeacherName,
   });
 }
 

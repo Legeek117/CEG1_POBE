@@ -388,8 +388,9 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
                 const Icon(Icons.lock, size: 14, color: Colors.red),
               if (!isUnlocked) const SizedBox(width: 8),
               Text(
-                '$selectedType $v',
+                '${selectedType == 'Interrogation' ? 'Interro' : selectedType} $v',
                 style: TextStyle(color: isUnlocked ? null : Colors.grey),
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

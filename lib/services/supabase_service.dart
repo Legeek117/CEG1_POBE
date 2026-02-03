@@ -91,6 +91,7 @@ class SupabaseService {
           subjects(name), 
           classes(
             *, 
+            main_teacher:profiles(full_name),
             students(count)
           )
         ''')
@@ -105,6 +106,12 @@ class SupabaseService {
       final subjectId = e['subject_id'];
       classData['subject_id'] = subjectId;
       classData['subject_name'] = (e['subjects'] as Map)['name'];
+
+      // Extraction du nom du PP
+      final mainTeacher = classData['main_teacher'];
+      if (mainTeacher != null) {
+        classData['main_teacher_name'] = mainTeacher['full_name'];
+      }
 
       // Extraction du count
       final studentsList = classData['students'] as List;
@@ -238,6 +245,17 @@ class SupabaseService {
     return List<Map<String, dynamic>>.from(response);
   }
 
+  static Future<List<Map<String, dynamic>>> fetchClassPerformanceRecords({
+    required int classId,
+    required int semester,
+  }) async {
+    return await client
+        .from('view_student_subject_performance')
+        .select('*, subjects(name)')
+        .eq('class_id', classId)
+        .eq('semester', semester);
+  }
+
   static Future<List<Map<String, dynamic>>> fetchStudentPerformance({
     required int classId,
     required int subjectId,
@@ -260,7 +278,32 @@ class SupabaseService {
         .eq('class_id', classId);
   }
 
-  // --- Notifications ---
+  static Future<int> countEnteredGrades({
+    required int classId,
+    required int semester,
+    int? subjectId,
+  }) async {
+    // Utilisons la vue qui aggrège déjà
+    final query = client
+        .from('view_student_subject_performance')
+        .select('interro_avg, devoir1, devoir2')
+        .eq('class_id', classId)
+        .eq('semester', semester);
+
+    if (subjectId != null) {
+      query.eq('subject_id', subjectId);
+    }
+
+    final data = await query;
+    int count = 0;
+    for (var r in data) {
+      if (r['interro_avg'] != null) count++;
+      if (r['devoir1'] != null) count++;
+      if (r['devoir2'] != null) count++;
+    }
+    return count;
+  }
+
   static Future<List<Map<String, dynamic>>> fetchNotifications() async {
     final user = client.auth.currentUser;
     // Récupère soit les notifs globales (receiver_id is null) soit les notifs pour l'user

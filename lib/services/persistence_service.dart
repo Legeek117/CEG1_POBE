@@ -31,6 +31,10 @@ class PersistenceService {
             'lastEntryDate': c.lastEntryDate,
             'matieres': c.matieres,
             'subjectId': c.subjectId,
+            'coeff': c.coeff,
+            'cycle': c.cycle,
+            'level': c.level,
+            'mainTeacherName': c.mainTeacherName,
           },
         )
         .toList();
@@ -52,6 +56,10 @@ class PersistenceService {
             lastEntryDate: item['lastEntryDate'],
             matieres: List<String>.from(item['matieres']),
             subjectId: item['subjectId'],
+            coeff: item['coeff'] ?? 1,
+            cycle: item['cycle'],
+            level: item['level'],
+            mainTeacherName: item['mainTeacherName'],
           ),
         )
         .toList();

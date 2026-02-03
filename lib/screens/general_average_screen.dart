@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
 import '../services/supabase_service.dart';
+import '../services/coefficient_service.dart';
 import '../theme.dart';
 
 class GeneralAverageScreen extends StatefulWidget {
@@ -20,22 +21,11 @@ class GeneralAverageScreen extends StatefulWidget {
 class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _rankedList = [];
-  Map<String, double> conductGrades = {};
+  int _selectedSemester = 1;
 
-  // Données simulées pour les autres matières (à remplacer par un vrai calcul batch plus tard)
-  final Map<String, Map<String, double>> mockSubjectAverages = {};
-
-  final Map<String, int> subjectCoeffs = {
-    'Mathématiques': 6,
-    'Physique': 5,
-    'SVT': 4,
-    'Philosophie': 3,
-    'Anglais': 3,
-    'Français': 3,
-    'Histoire-Géo': 2,
-    'EPS': 2,
-    'Conduite': 1,
-  };
+  // Stocke les moyennes par matière pour chaque élève : { studentId: { subjectName: avg } }
+  Map<String, Map<String, double>> _subjectAverages = {};
+  Map<String, Map<String, int>> _subjectCoeffs = {};
 
   @override
   void initState() {
@@ -46,30 +36,60 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final students = await SupabaseService.fetchStudentsInClass(
-        int.parse(widget.schoolClass.id),
+      final records = await SupabaseService.fetchClassPerformanceRecords(
+        classId: int.parse(widget.schoolClass.id),
+        semester: _selectedSemester,
       );
 
-      // Calculer les moyennes (simulé ici pour la structure, réel dès que les notes existent)
-      List<Map<String, dynamic>> tempRanked = [];
-      for (var s in students) {
-        final student = Student(
-          id: s['id'],
-          matricule: s['matricule'],
-          name: '${s['first_name']} ${s['last_name']}',
-        );
+      final Map<String, List<Map<String, dynamic>>> studentsMap = {};
+      final Map<String, String> studentNames = {};
+      final Map<String, String> studentMatricules = {};
 
-        // Simuler des moyennes pour l'instant car le calcul cross-matière est complexe
-        double ga = 10.0 + (student.matricule.hashCode % 80) / 10;
-        tempRanked.add({'student': student, 'ga': ga});
-        conductGrades[student.matricule] = 14.0;
-
-        // Mock data structure pour l'UI
-        mockSubjectAverages[student.matricule] = {
-          'Mathématiques': ga - 1,
-          'Français': ga + 1,
-        };
+      for (var r in records) {
+        final sid = r['student_id'].toString();
+        studentsMap.putIfAbsent(sid, () => []).add(r);
+        studentNames[sid] = '${r['first_name']} ${r['last_name']}';
+        studentMatricules[sid] = r['matricule'] ?? 'N/A';
       }
+
+      List<Map<String, dynamic>> tempRanked = [];
+      _subjectAverages = {};
+      _subjectCoeffs = {};
+
+      studentsMap.forEach((sid, performances) {
+        double totalWeightedPoints = 0;
+        int totalCoeffs = 0;
+        _subjectAverages[sid] = {};
+        _subjectCoeffs[sid] = {};
+
+        for (var p in performances) {
+          final subjectName = p['subjects']['name'] as String;
+          final interroAvg = (p['interro_avg'] as num?)?.toDouble() ?? 0.0;
+          final d1 = (p['devoir1'] as num?)?.toDouble() ?? 0.0;
+          final d2 = (p['devoir2'] as num?)?.toDouble() ?? 0.0;
+
+          final subjectAvg = (interroAvg + d1 + d2) / 3;
+          final coeff = CoefficientService.getCoefficient(
+            subjectName: subjectName,
+            level: widget.schoolClass.level ?? '6ème',
+            cycle: widget.schoolClass.cycle,
+          );
+
+          _subjectAverages[sid]![subjectName] = subjectAvg;
+          _subjectCoeffs[sid]![subjectName] = coeff;
+
+          totalWeightedPoints += (subjectAvg * coeff);
+          totalCoeffs += coeff;
+        }
+
+        double ga = totalCoeffs > 0 ? totalWeightedPoints / totalCoeffs : 0.0;
+        tempRanked.add({
+          'id': sid,
+          'name': studentNames[sid],
+          'matricule': studentMatricules[sid],
+          'ga': ga,
+        });
+      });
 
       // Tri et Rang
       tempRanked.sort((a, b) => b['ga'].compareTo(a['ga']));
@@ -83,7 +103,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
     } catch (e) {
       debugPrint('Erreur chargement moyennes générales: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -103,6 +123,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           ? _buildEmptyState()
           : Column(
               children: [
+                _buildSemesterSelector(),
                 _buildSummaryHeader(_rankedList),
                 Expanded(
                   child: ListView.separated(
@@ -112,7 +133,9 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
                     itemBuilder: (context, index) {
                       final item = _rankedList[index];
                       return _buildStudentExpansionTile(
-                        item['student'],
+                        item['id'],
+                        item['name'],
+                        item['matricule'],
                         item['ga'],
                         item['rank'],
                       );
@@ -126,6 +149,64 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
 
   Widget _buildEmptyState() {
     return const Center(child: Text('Aucun élève trouvé dans cette classe.'));
+  }
+
+  Widget _buildSemesterSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: Colors.white,
+      child: Row(
+        children: [
+          const Text(
+            'SEMESTRE',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Row(
+              children: [1, 2].map((sem) {
+                final isSelected = _selectedSemester == sem;
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: sem == 1 ? 8 : 0),
+                    child: InkWell(
+                      onTap: () {
+                        setState(() => _selectedSemester = sem);
+                        _loadData();
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppTheme.primaryBlue
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'S$sem',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black87,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSummaryHeader(List<Map<String, dynamic>> list) {
@@ -164,7 +245,16 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
     );
   }
 
-  Widget _buildStudentExpansionTile(Student student, double ga, int rank) {
+  Widget _buildStudentExpansionTile(
+    String id,
+    String name,
+    String matricule,
+    double ga,
+    int rank,
+  ) {
+    final sAverages = _subjectAverages[id] ?? {};
+    final sCoeffs = _subjectCoeffs[id] ?? {};
+
     return ExpansionTile(
       leading: CircleAvatar(
         backgroundColor: rank == 1
@@ -179,10 +269,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           ),
         ),
       ),
-      title: Text(
-        student.name,
-        style: const TextStyle(fontWeight: FontWeight.bold),
-      ),
+      title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
       subtitle: Text(
         'MOY. GÉNÉRALE : ${ga.toStringAsFixed(2)}/20',
         style: const TextStyle(
@@ -195,17 +282,17 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              _buildSubjectRow(
-                'Conduite',
-                conductGrades[student.matricule] ?? 10.0,
-                isEditable: true,
-                onEdit: (val) {
-                  setState(() => conductGrades[student.matricule] = val);
-                },
-              ),
-              const Divider(),
-              ...mockSubjectAverages[student.matricule]!.entries.map(
-                (e) => _buildSubjectRow(e.key, e.value),
+              if (sAverages.isEmpty)
+                const Text(
+                  'Aucune note saisie pour cet élève',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ...sAverages.entries.map(
+                (e) => _buildSubjectRow(
+                  e.key,
+                  e.value,
+                  coeff: sCoeffs[e.key] ?? 1,
+                ),
               ),
             ],
           ),
@@ -214,52 +301,21 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
     );
   }
 
-  Widget _buildSubjectRow(
-    String subject,
-    double avg, {
-    bool isEditable = false,
-    Function(double)? onEdit,
-  }) {
+  Widget _buildSubjectRow(String subject, double avg, {int coeff = 1}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Expanded(
-            child: Text(
-              subject,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isEditable ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
+          Expanded(child: Text(subject, style: const TextStyle(fontSize: 13))),
           Text(
-            'Coeff: ${subjectCoeffs[subject] ?? 1}',
+            'Coeff: $coeff',
             style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
           const SizedBox(width: 16),
-          isEditable
-              ? SizedBox(
-                  width: 60,
-                  child: TextField(
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.all(4),
-                      border: OutlineInputBorder(),
-                    ),
-                    style: const TextStyle(fontSize: 13),
-                    onChanged: (v) {
-                      double? d = double.tryParse(v);
-                      if (d != null) onEdit!(d);
-                    },
-                    controller: TextEditingController(text: avg.toString()),
-                  ),
-                )
-              : Text(
-                  avg.toStringAsFixed(2),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+          Text(
+            avg.toStringAsFixed(2),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         ],
       ),
     );

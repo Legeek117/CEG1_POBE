@@ -15,6 +15,7 @@ class AppState {
   // États de contrôle globaux du Censeur (récupérés depuis la BDD)
   static bool isAcademicYearActive = true;
   static String currentAcademicYear = "";
+  static String releaseNotes = "";
   static List<int> unlockedSemesters = [];
 
   // Stocke les détails des verrous (index, start_date, end_date)

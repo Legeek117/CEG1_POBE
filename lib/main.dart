@@ -104,7 +104,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
     _notifSubscription = SupabaseService.notificationStream.listen((notifs) {
       if (notifs.isNotEmpty) {
         final latest = notifs.last;
-        _showInAppNotification(latest['title'], latest['content']);
+        _showInAppNotification(latest['title'], latest['body']);
       }
     });
   }

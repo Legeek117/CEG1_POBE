@@ -1,6 +1,7 @@
 import '../services/supabase_service.dart';
 import '../services/persistence_service.dart';
 import '../models/school_data.dart';
+import '../services/coefficient_service.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import 'package:flutter/material.dart';
@@ -30,6 +31,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   int _pendingCount = 0;
   bool _isOnline = true;
+  Map<String, double> _classesHealth = {};
+  List<SchoolClass> _classes = [];
 
   @override
   void initState() {
@@ -44,6 +47,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       if (_isOnline) {
+        final appConfig = await SupabaseService.fetchAppConfig();
+        AppState.releaseNotes = appConfig['release_notes'] ?? '';
+        AppState.isSessionUnlocked = appConfig['enable_mg_session'] ?? false;
+
         // 1. Charger les paramètres globaux
         final settings = await SupabaseService.fetchGlobalSettings();
         AppState.isAcademicYearActive = settings['is_active'];
@@ -80,16 +87,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         // 3. Charger les classes assignées
         final fetchedClassesData = await SupabaseService.fetchTeacherClasses();
-        final List<SchoolClass> classes = fetchedClassesData.map((c) {
-          return SchoolClass(
-            id: c['id'].toString(),
-            name: c['name'],
-            studentCount: c['student_count'] ?? 0,
-            lastEntryDate: 'N/A',
-            matieres: [c['subject_name']],
-            subjectId: c['subject_id'],
-          );
-        }).toList();
+
+        // REGROUPEMENT PAR CLASSE (Plusieurs matières -> Une seule carte)
+        final Map<String, SchoolClass> groupedClasses = {};
+
+        for (var c in fetchedClassesData) {
+          final className = c['name'];
+          final level = c['level'] ?? '6ème';
+          final cycle = c['cycle'] ?? 1;
+          final subjectName = c['subject_name'] ?? '';
+          final subjectId = c['subject_id'];
+
+          if (!groupedClasses.containsKey(className)) {
+            groupedClasses[className] = SchoolClass(
+              id: c['id'].toString(),
+              name: className,
+              studentCount: c['student_count'] ?? 0,
+              lastEntryDate: 'N/A',
+              subjectId: subjectId,
+              matieres: [subjectName],
+              cycle: cycle,
+              level: level,
+              mainTeacherName: c['main_teacher_name'],
+              coeff: CoefficientService.getCoefficient(
+                subjectName: subjectName,
+                level: level,
+                cycle: cycle,
+              ),
+            );
+          }
+        }
+
+        final List<SchoolClass> classes = groupedClasses.values.toList();
+
+        // Calcul de la santé des saisies
+        final Map<String, double> classesHealth = {};
+        for (var cls in classes) {
+          final subjectsCount = cls.matieres.length;
+          // Estimation : 4 devoirs/interros par matière par semestre
+          // Total attendu pour l'année (ou le semestre en cours)
+          // Ici on simplifie: countEnteredGrades retourne le total actuel
+          // Notes attendues = nb_élèves * nb_matières * 4 (quota arbitraire pour la barre)
+          final expected = cls.studentCount * subjectsCount * 4;
+          if (expected > 0) {
+            // Par défaut, on se base sur le dernier semestre actif/débloqué
+            final currentSemester = AppState.unlockedSemesters.isNotEmpty
+                ? AppState.unlockedSemesters.last
+                : 1;
+            final actual = await SupabaseService.countEnteredGrades(
+              classId: int.parse(cls.id),
+              semester: currentSemester,
+            );
+            double ratio = actual / expected;
+            if (ratio > 1.0) ratio = 1.0;
+            classesHealth[cls.id] = ratio;
+          } else {
+            classesHealth[cls.id] = 0.0;
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _classes = classes;
+            _classesHealth = classesHealth;
+          });
+        }
 
         AppState.classes = classes;
         await PersistenceService.saveClasses(classes);
@@ -117,7 +179,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           AppState.teacherEmail = cachedProfile['email'] ?? '';
         }
 
-        AppState.classes = await PersistenceService.loadClasses();
+        final loadedClasses = await PersistenceService.loadClasses();
+        AppState.classes = loadedClasses;
+        if (mounted) setState(() => _classes = loadedClasses);
         final pending = await PersistenceService.loadPendingEvaluations();
         if (mounted) setState(() => _pendingCount = pending.length);
         final settings = await PersistenceService.loadSettings();
@@ -166,6 +230,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: CustomScrollView(
         slivers: [
           _buildHeader(),
+          _buildDeadlinesOrExams(), // Nouveau widget pour les deadlines
           _buildSyncStatus(),
           _buildSectionTitle('MES CLASSES'),
           _buildClassesList(),
@@ -175,6 +240,144 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onPressed: widget.onSync,
         backgroundColor: AppTheme.primaryBlue,
         child: const Icon(Icons.sync, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildDeadlinesOrExams() {
+    if (AppState.unlockedEvaluations.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    List<Widget> cards = [];
+
+    // 1. Interrogations
+    if (AppState.unlockedEvaluations.containsKey('Interrogation')) {
+      for (var lock in AppState.unlockedEvaluations['Interrogation']!) {
+        final end = lock['end_date'] != null
+            ? DateTime.parse(lock['end_date'])
+            : null;
+        if (end != null && end.isAfter(DateTime.now())) {
+          cards.add(
+            _buildDeadlineCard(
+              'Interrogation ${lock['index']}',
+              end,
+              Colors.orange,
+            ),
+          );
+        }
+      }
+    }
+
+    // 2. Devoirs
+    if (AppState.unlockedEvaluations.containsKey('Devoir')) {
+      for (var lock in AppState.unlockedEvaluations['Devoir']!) {
+        final end = lock['end_date'] != null
+            ? DateTime.parse(lock['end_date'])
+            : null;
+        if (end != null && end.isAfter(DateTime.now())) {
+          cards.add(
+            _buildDeadlineCard(
+              'Devoir ${lock['index']}',
+              end,
+              Colors.redAccent,
+            ),
+          );
+        }
+      }
+    }
+
+    if (cards.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                'Saisies en cours',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            ...cards,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeadlineCard(String title, DateTime deadline, Color color) {
+    final daysLeft = deadline.difference(DateTime.now()).inDays;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.access_time_filled, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  'Date limite : ${deadline.day}/${deadline.month}/${deadline.year}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: daysLeft < 3
+                  ? Colors.red.withValues(alpha: 0.1)
+                  : Colors.green.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              daysLeft == 0 ? "Aujourd'hui" : '$daysLeft j restants',
+              style: TextStyle(
+                color: daysLeft < 3 ? Colors.red : Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -443,101 +646,172 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate((context, index) {
-          final schoolClass = AppState.classes[index];
+          final schoolClass = _classes[index];
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              child: InkWell(
-                onTap: () => widget.onSelectClass(schoolClass),
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: AppTheme.lightBlue,
-                          borderRadius: BorderRadius.circular(12),
+            child: _buildClassCard(schoolClass),
+          );
+        }, childCount: _classes.length),
+      ),
+    );
+  }
+
+  Widget _buildClassCard(SchoolClass schoolClass) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () => widget.onSelectClass(schoolClass),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: AppTheme.lightBlue,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.group_outlined,
+                      color: AppTheme.primaryBlue,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          schoolClass.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.group_outlined,
-                          color: AppTheme.primaryBlue,
+                        const SizedBox(height: 4),
+                        Text(
+                          schoolClass.matieres.join(', '),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 8),
+                        Row(
                           children: [
+                            if (schoolClass.mainTeacherName != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryBlue.withValues(
+                                    alpha: 0.1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.star,
+                                      size: 14,
+                                      color: AppTheme.primaryBlue,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'PP: ${schoolClass.mainTeacherName}',
+                                      style: const TextStyle(
+                                        color: AppTheme.primaryBlue,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (schoolClass.mainTeacherName != null)
+                              const SizedBox(width: 8),
                             Text(
-                              schoolClass.name,
+                              'Coeff: ${schoolClass.coeff}',
                               style: const TextStyle(
+                                color: AppTheme.primaryBlue,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 18,
+                                fontSize: 13,
                               ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Indicateur de Santé des saisies
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  '${schoolClass.studentCount} élèves',
-                                  style: const TextStyle(
+                                const Text(
+                                  'Santé des saisies',
+                                  style: TextStyle(
+                                    fontSize: 11,
                                     color: Colors.grey,
-                                    fontSize: 13,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                TextButton(
-                                  onPressed: () =>
-                                      widget.onViewAverages(schoolClass),
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: const Size(0, 0),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  child: const Text(
-                                    'Voir moyennes',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.primaryBlue,
-                                      fontWeight: FontWeight.bold,
-                                      decoration: TextDecoration.underline,
-                                    ),
+                                Text(
+                                  '${((_classesHealth[schoolClass.id] ?? 0) * 100).toInt()}%',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        (_classesHealth[schoolClass.id] ?? 0) >
+                                            0.8
+                                        ? Colors.green[700]
+                                        : Colors.orange[700],
                                   ),
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: _classesHealth[schoolClass.id] ?? 0,
+                                backgroundColor: AppTheme.lightBlue,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  (_classesHealth[schoolClass.id] ?? 0) > 0.8
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ),
+                                minHeight: 6,
+                              ),
+                            ),
                           ],
                         ),
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          const Text(
-                            'Dernière saisie',
-                            style: TextStyle(fontSize: 10, color: Colors.grey),
-                          ),
-                          Text(
-                            schoolClass.lastEntryDate,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryBlue,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.chevron_right, color: Colors.grey),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ),
-          );
-        }, childCount: AppState.classes.length),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => widget.onViewAverages(schoolClass),
+                    icon: const Icon(Icons.analytics_outlined, size: 18),
+                    label: const Text('Moyennes'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

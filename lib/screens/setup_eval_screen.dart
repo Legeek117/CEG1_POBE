@@ -185,7 +185,8 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
                 child: Text(
-                  'Cette évaluation est actuellement bloquée par le censeur.',
+                  _blockingReason ??
+                      'Cette évaluation est actuellement bloquée par le censeur.',
                   style: TextStyle(
                     color: Colors.red.shade700,
                     fontSize: 12,
@@ -403,34 +404,61 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
     );
   }
 
+  String? _blockingReason;
+
   bool _isSelectionAllowed() {
+    _blockingReason = null;
     if (selectedMatiere == null) return false;
+
     // Vérifie si le semestre est débloqué
-    if (!AppState.unlockedSemesters.contains(selectedSemestre)) return false;
+    if (!AppState.unlockedSemesters.contains(selectedSemestre)) {
+      _blockingReason =
+          'Le Semestre $selectedSemestre est verrouillé pour cette année académique.';
+      return false;
+    }
 
     // Vérifie si l'évaluation spécifique est débloquée
     final locks = AppState.unlockedEvaluations[selectedType];
-    if (locks == null) return false;
+    if (locks == null) {
+      _blockingReason = 'Type d\'évaluation non configuré.';
+      return false;
+    }
 
     final lock = locks.firstWhere(
       (l) => l['index'] == typeIndex,
       orElse: () => {},
     );
 
-    if (lock.isEmpty) return false;
+    if (lock.isEmpty) {
+      _blockingReason =
+          'Cette évaluation ($selectedType $typeIndex) n\'est pas ouverte.';
+      return false;
+    }
 
     // Vérification des dates (si présentes)
     final now = DateTime.now();
+    // On compare uniquement les dates (année, mois, jour) pour éviter les problèmes d'heures
     final today = DateTime(now.year, now.month, now.day);
 
     if (lock['start_date'] != null) {
       final start = DateTime.parse(lock['start_date']);
-      if (today.isBefore(start)) return false;
+      final startDate = DateTime(start.year, start.month, start.day);
+      if (today.isBefore(startDate)) {
+        _blockingReason =
+            'Saisie ouverte à partir du ${start.day}/${start.month}/${start.year}.';
+        return false;
+      }
     }
 
     if (lock['end_date'] != null) {
       final end = DateTime.parse(lock['end_date']);
-      if (today.isAfter(end)) return false;
+      final endDate = DateTime(end.year, end.month, end.day);
+      // On accepte jusqu'à la fin de la journée de fin (donc strict after pour bloquer)
+      if (today.isAfter(endDate)) {
+        _blockingReason =
+            'La période de saisie est terminée depuis le ${end.day}/${end.month}/${end.year}.';
+        return false;
+      }
     }
 
     return true;

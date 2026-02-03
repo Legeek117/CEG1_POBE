@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/persistence_service.dart';
 import '../theme.dart';
 import 'package:flutter/material.dart';
 
@@ -68,6 +69,9 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
         return;
       }
+
+      // Marquer l'utilisateur comme connecté pour le mode hors-ligne
+      await PersistenceService.setLoggedIn(true);
 
       if (!mounted) return;
       widget.onLoginSuccess();

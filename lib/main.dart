@@ -17,6 +17,7 @@ import 'screens/averages_screen.dart';
 import 'screens/general_average_screen.dart';
 import 'widgets/update_dialog.dart';
 import 'services/supabase_service.dart';
+import 'services/persistence_service.dart';
 import 'services/notification_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'dart:async';
@@ -85,18 +86,42 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
   }
 
   void _checkSession() async {
-    final session = SupabaseService.client.auth.currentSession;
-    if (session != null) {
-      final profile = await SupabaseService.fetchCurrentProfile();
-      if (!mounted) return;
-      if (profile?['must_change_password'] == true) {
-        setState(() {
-          isFirstLogin = true;
-          currentPage = 'change_password';
-        });
+    // Vérifier d'abord le cache local pour le mode hors-ligne
+    final isLoggedInCache = await PersistenceService.isLoggedIn();
+
+    if (isLoggedInCache) {
+      // L'utilisateur était connecté, tenter de vérifier en ligne si possible
+      final isOnline = await SupabaseService.isOnline();
+
+      if (isOnline) {
+        // En ligne : vérifier la session Supabase
+        final session = SupabaseService.client.auth.currentSession;
+        if (session != null) {
+          final profile = await SupabaseService.fetchCurrentProfile();
+          if (!mounted) return;
+          if (profile?['must_change_password'] == true) {
+            setState(() {
+              isFirstLogin = true;
+              currentPage = 'change_password';
+            });
+          } else {
+            setState(() => currentPage = 'dashboard');
+          }
+        } else {
+          // Session expirée en ligne, déconnecter
+          await PersistenceService.clearSession();
+          if (!mounted) return;
+          setState(() => currentPage = 'login');
+        }
       } else {
+        // Hors-ligne mais connecté en cache : accès au Dashboard
+        if (!mounted) return;
         setState(() => currentPage = 'dashboard');
       }
+    } else {
+      // Pas de session en cache, afficher la page de connexion
+      if (!mounted) return;
+      setState(() => currentPage = 'login');
     }
   }
 
@@ -248,11 +273,12 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           onViewAverages: (c) => navigateTo('averages', schoolClass: c),
           onSync: () => navigateTo('sync'),
           onNavigate: (page) => navigateTo(page),
-          onLogout: () {
+          onLogout: () async {
+            await PersistenceService.clearSession();
+            await SupabaseService.signOut();
             setState(() {
               currentPage = 'login';
-              isFirstLogin =
-                  false; // Pour ne pas re-forcer le changement de pass
+              isFirstLogin = false;
             });
           },
         );

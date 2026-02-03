@@ -45,6 +45,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           onPressed: widget.onBack,
           icon: const Icon(Icons.arrow_back),
         ),
+        actions: [
+          if (_notifications.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.done_all),
+              tooltip: 'Tout marquer comme lu',
+              onPressed: () async {
+                await SupabaseService.markAllNotificationsAsRead();
+                _loadNotifications();
+              },
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -75,7 +86,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  void _showNotificationDetail(Map<String, dynamic> item) {
+  void _showNotificationDetail(Map<String, dynamic> item) async {
+    // Marquer comme lue
+    await SupabaseService.markNotificationAsRead(item['id']);
+
+    // Recharger la liste pour retirer la notification lue
+    _loadNotifications();
+
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

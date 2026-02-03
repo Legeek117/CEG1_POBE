@@ -47,16 +47,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       if (_isOnline) {
-        final appConfig = await SupabaseService.fetchAppConfig();
+        // OPTIMISATION : Charger toutes les données indépendantes en parallèle
+        final results = await Future.wait([
+          SupabaseService.fetchAppConfig(), // 0
+          SupabaseService.fetchGlobalSettings(), // 1
+          SupabaseService.fetchCurrentProfile(), // 2
+          SupabaseService.fetchManagedClass(), // 3
+          SupabaseService.fetchTeacherClasses(), // 4
+          SupabaseService.fetchCensorUnlocks(), // 5
+        ]);
+
+        final appConfig = results[0] as Map<String, dynamic>;
+        final settings = results[1] as Map<String, dynamic>;
+        final profile = results[2] as Map<String, dynamic>?;
+        final managedClass = results[3] as Map<String, dynamic>?;
+        final fetchedClassesData = results[4] as List<dynamic>;
+        final locks = results[5] as List<dynamic>;
+
+        // Traiter appConfig
         AppState.releaseNotes = appConfig['release_notes'] ?? '';
         AppState.isSessionUnlocked = appConfig['enable_mg_session'] ?? false;
 
-        // 1. Charger les paramètres globaux
-        final settings = await SupabaseService.fetchGlobalSettings();
+        // Traiter settings
         AppState.isAcademicYearActive = settings['is_active'];
         AppState.currentAcademicYear = settings['name'];
-
-        // CORRECTION CRITIQUE : Remplir la liste des semestres débloqués
         AppState.unlockedSemesters = [];
         if (settings['is_semester1_locked'] != true) {
           AppState.unlockedSemesters.add(1);
@@ -64,19 +78,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (settings['is_semester2_locked'] != true) {
           AppState.unlockedSemesters.add(2);
         }
-
         await PersistenceService.saveSettings(settings);
 
-        // 2. Charger le profil
-        final profile = await SupabaseService.fetchCurrentProfile();
+        // Traiter profile
         if (profile != null) {
-          await PersistenceService.saveProfile(profile); // Mettre en cache
+          await PersistenceService.saveProfile(profile);
           AppState.teacherName = profile['full_name'] ?? 'Professeur';
           AppState.teacherEmail = profile['email'] ?? '';
         }
 
-        // 2.5 Détecter si PP
-        final managedClass = await SupabaseService.fetchManagedClass();
+        // Traiter managedClass
         if (managedClass != null) {
           AppState.isPrincipalTeacher = true;
           AppState.managedClassId = managedClass['id'].toString();
@@ -84,9 +95,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           AppState.isPrincipalTeacher = false;
           AppState.managedClassId = null;
         }
-
-        // 3. Charger les classes assignées
-        final fetchedClassesData = await SupabaseService.fetchTeacherClasses();
 
         // REGROUPEMENT PAR CLASSE (Plusieurs matières -> Une seule carte)
         final Map<String, SchoolClass> groupedClasses = {};
@@ -115,36 +123,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 cycle: cycle,
               ),
             );
+          } else {
+            // Ajouter la matière si elle n'est pas déjà présente
+            if (!groupedClasses[className]!.matieres.contains(subjectName)) {
+              groupedClasses[className]!.matieres.add(subjectName);
+            }
+          }
+        }
+
+        // Si je suis PP, j'ajoute "Conduite" à ma classe gérée si elle n'y est pas
+        if (AppState.isPrincipalTeacher && managedClass != null) {
+          final managedClassName = managedClass['name'];
+          final level = managedClass['level'] ?? '6ème';
+          final cycle = managedClass['cycle'] ?? 1;
+
+          if (groupedClasses.containsKey(managedClassName)) {
+            if (!groupedClasses[managedClassName]!.matieres.contains(
+              'Conduite',
+            )) {
+              groupedClasses[managedClassName]!.matieres.add('Conduite');
+            }
+          } else {
+            // Cas rare : Le PP n'enseigne aucune matière dans sa propre classe
+            groupedClasses[managedClassName] = SchoolClass(
+              id: AppState.managedClassId!,
+              name: managedClassName,
+              studentCount: 0, // Sera mis à jour si besoin ou restera 0
+              lastEntryDate: 'N/A',
+              subjectId: null,
+              matieres: ['Conduite'],
+              cycle: cycle,
+              level: level,
+              mainTeacherName: AppState.teacherName,
+              coeff: 1,
+            );
           }
         }
 
         final List<SchoolClass> classes = groupedClasses.values.toList();
 
-        // Calcul de la santé des saisies
-        final Map<String, double> classesHealth = {};
-        for (var cls in classes) {
+        // OPTIMISATION : Calcul de santé en parallèle
+        final currentSemester = AppState.unlockedSemesters.isNotEmpty
+            ? AppState.unlockedSemesters.last
+            : 1;
+
+        final healthFutures = classes.map((cls) async {
           final subjectsCount = cls.matieres.length;
-          // Estimation : 4 devoirs/interros par matière par semestre
-          // Total attendu pour l'année (ou le semestre en cours)
-          // Ici on simplifie: countEnteredGrades retourne le total actuel
-          // Notes attendues = nb_élèves * nb_matières * 4 (quota arbitraire pour la barre)
           final expected = cls.studentCount * subjectsCount * 4;
           if (expected > 0) {
-            // Par défaut, on se base sur le dernier semestre actif/débloqué
-            final currentSemester = AppState.unlockedSemesters.isNotEmpty
-                ? AppState.unlockedSemesters.last
-                : 1;
             final actual = await SupabaseService.countEnteredGrades(
               classId: int.parse(cls.id),
               semester: currentSemester,
             );
             double ratio = actual / expected;
             if (ratio > 1.0) ratio = 1.0;
-            classesHealth[cls.id] = ratio;
-          } else {
-            classesHealth[cls.id] = 0.0;
+            return MapEntry(cls.id, ratio);
           }
-        }
+          return MapEntry(cls.id, 0.0);
+        }).toList();
+
+        final healthResults = await Future.wait(healthFutures);
+        final Map<String, double> classesHealth = Map.fromEntries(
+          healthResults,
+        );
 
         if (mounted) {
           setState(() {
@@ -156,8 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         AppState.classes = classes;
         await PersistenceService.saveClasses(classes);
 
-        // 4. Charger les verrous du censeur (V2 : 'Interrogation', 'Devoir')
-        final locks = await SupabaseService.fetchCensorUnlocks();
+        // Traiter locks
         AppState.unlockedEvaluations = {'Interrogation': [], 'Devoir': []};
         for (var lock in locks) {
           final type = lock['type'].toString();
@@ -179,16 +219,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
           AppState.teacherEmail = cachedProfile['email'] ?? '';
         }
 
+        // Charger les classes depuis le cache
         final loadedClasses = await PersistenceService.loadClasses();
         AppState.classes = loadedClasses;
-        if (mounted) setState(() => _classes = loadedClasses);
+        if (mounted) {
+          setState(() {
+            _classes = loadedClasses;
+            // Initialiser la santé à 0 en mode hors-ligne (pas de calcul possible)
+            _classesHealth = {for (var c in loadedClasses) c.id: 0.0};
+          });
+        }
+
+        // Charger les évaluations en attente
         final pending = await PersistenceService.loadPendingEvaluations();
         if (mounted) setState(() => _pendingCount = pending.length);
+
+        // Charger les paramètres
         final settings = await PersistenceService.loadSettings();
         if (settings != null) {
           AppState.isAcademicYearActive = settings['is_active'];
           AppState.currentAcademicYear = settings['name'];
+
+          // Charger les semestres débloqués
+          AppState.unlockedSemesters = [];
+          if (settings['is_semester1_locked'] != true) {
+            AppState.unlockedSemesters.add(1);
+          }
+          if (settings['is_semester2_locked'] != true) {
+            AppState.unlockedSemesters.add(2);
+          }
         }
+
+        // En mode hors-ligne, on suppose que toutes les évaluations sont débloquées
+        // (l'utilisateur ne pourra de toute façon pas synchroniser)
+        AppState.unlockedEvaluations = {
+          'Interrogation': [
+            {'index': 1, 'start_date': null, 'end_date': null},
+            {'index': 2, 'start_date': null, 'end_date': null},
+            {'index': 3, 'start_date': null, 'end_date': null},
+          ],
+          'Devoir': [
+            {'index': 1, 'start_date': null, 'end_date': null},
+            {'index': 2, 'start_date': null, 'end_date': null},
+          ],
+        };
+
+        // Note : isPrincipalTeacher et managedClassId ne peuvent pas être vérifiés hors-ligne
+        // Ils conservent leur valeur précédente (ou false par défaut)
       }
     } catch (e) {
       debugPrint('Erreur chargement Dashboard: $e'); // Log technique pour debug
@@ -227,14 +304,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       drawer: _buildDrawer(context),
-      body: CustomScrollView(
-        slivers: [
-          _buildHeader(),
-          _buildDeadlinesOrExams(), // Nouveau widget pour les deadlines
-          _buildSyncStatus(),
-          _buildSectionTitle('MES CLASSES'),
-          _buildClassesList(),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            _buildHeader(),
+            _buildDeadlinesOrExams(),
+            _buildSyncStatus(),
+            _buildSectionTitle('MES CLASSES'),
+            _buildClassesList(),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: widget.onSync,

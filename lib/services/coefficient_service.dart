@@ -18,7 +18,20 @@ class CoefficientService {
 
     // --- 1ER CYCLE (6e, 5e, 4e, 3e) ---
     if (effectiveCycle == 1) {
-      // 6ème et 5ème (Coeffs 1 partout selon JSON utilisateur)
+      // Matières de Français (2 matières distinctes au 1er cycle uniquement)
+      // Communication Écrite et Lecture
+      if (sub.contains('communication') || sub.contains('lecture')) {
+        // 6ème et 5ème : Coefficient 1
+        if (lvl.contains('6') || lvl.contains('5')) {
+          return 1;
+        }
+        // 4ème et 3ème : Coefficient 2
+        if (lvl.contains('4') || lvl.contains('3')) {
+          return 2;
+        }
+      }
+
+      // 6ème et 5ème : Coefficient 1 pour toutes les autres matières
       if (lvl.contains('6') || lvl.contains('5')) {
         return 1;
       }
@@ -28,12 +41,9 @@ class CoefficientService {
         if (sub.contains('math')) {
           return 3;
         }
-        if (sub.contains('français') ||
-            sub.contains('anglais') ||
+        if (sub.contains('anglais') ||
             sub.contains('allemand') ||
             sub.contains('espagnol') ||
-            sub.contains('commun') ||
-            sub.contains('lecture') ||
             sub.contains('pct') ||
             sub.contains('physique') ||
             sub.contains('svt') ||

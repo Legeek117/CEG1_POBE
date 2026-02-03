@@ -19,7 +19,7 @@ class SupabaseService {
 
   // --- App Config & Updates ---
   static Future<Map<String, dynamic>> fetchAppConfig() async {
-    return await client.from('app_config').select('*').eq('id', 1).single();
+    return await client.from('app_config').select('*').limit(1).single();
   }
 
   // --- Auth ---
@@ -306,11 +306,12 @@ class SupabaseService {
 
   static Future<List<Map<String, dynamic>>> fetchNotifications() async {
     final user = client.auth.currentUser;
-    // Récupère soit les notifs globales (receiver_id is null) soit les notifs pour l'user
+    // Récupère uniquement les notifications NON LUES
     return await client
         .from('notifications')
         .select('*')
         .or('receiver_id.is.null,receiver_id.eq.${user?.id}')
+        .eq('is_read', false)
         .order('created_at', ascending: false);
   }
 
@@ -319,14 +320,35 @@ class SupabaseService {
     return client
         .from('notifications')
         .stream(primaryKey: ['id'])
+        .eq('is_read', false)
         .order('created_at')
         .map((data) {
-          // Filtrer localement car .stream().or() n'est pas encore super stable en client Dart
+          // Filtrer localement pour receiver_id
           return data
               .where(
                 (n) => n['receiver_id'] == null || n['receiver_id'] == user?.id,
               )
               .toList();
         });
+  }
+
+  /// Marquer une notification comme lue
+  static Future<void> markNotificationAsRead(String notificationId) async {
+    await client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('id', notificationId);
+  }
+
+  /// Marquer toutes les notifications de l'utilisateur comme lues
+  static Future<void> markAllNotificationsAsRead() async {
+    final user = client.auth.currentUser;
+    if (user == null) return;
+
+    await client
+        .from('notifications')
+        .update({'is_read': true})
+        .or('receiver_id.is.null,receiver_id.eq.${user.id}')
+        .eq('is_read', false);
   }
 }

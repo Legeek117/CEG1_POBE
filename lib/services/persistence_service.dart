@@ -7,6 +7,27 @@ class PersistenceService {
   static const String keySettings = 'cached_settings';
   static const String keyProfile = 'cached_profile';
   static const String keyPendingEvaluations = 'pending_evaluations';
+  static const String keyIsLoggedIn = 'is_logged_in';
+
+  // --- Gestion de la session pour le mode hors-ligne ---
+
+  /// Définir l'état de connexion de l'utilisateur
+  static Future<void> setLoggedIn(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(keyIsLoggedIn, value);
+  }
+
+  /// Vérifier si l'utilisateur est connecté (en cache)
+  static Future<bool> isLoggedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(keyIsLoggedIn) ?? false;
+  }
+
+  /// Effacer la session (déconnexion)
+  static Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(keyIsLoggedIn);
+  }
 
   static Future<void> saveProfile(Map<String, dynamic> profile) async {
     final prefs = await SharedPreferences.getInstance();

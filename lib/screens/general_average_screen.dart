@@ -36,6 +36,9 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
+      final studentsList = await SupabaseService.fetchStudentsInClass(
+        int.parse(widget.schoolClass.id),
+      );
       final records = await SupabaseService.fetchClassPerformanceRecords(
         classId: int.parse(widget.schoolClass.id),
         semester: _selectedSemester,
@@ -45,11 +48,20 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       final Map<String, String> studentNames = {};
       final Map<String, String> studentMatricules = {};
 
+      // 1. Initialiser avec TOUS les élèves
+      for (var s in studentsList) {
+        final sid = s['id'].toString();
+        studentsMap[sid] = [];
+        studentNames[sid] = '${s['first_name']} ${s['last_name']}';
+        studentMatricules[sid] = s['matricule'] ?? 'N/A';
+      }
+
+      // 2. Remplir avec les notes existantes
       for (var r in records) {
         final sid = r['student_id'].toString();
-        studentsMap.putIfAbsent(sid, () => []).add(r);
-        studentNames[sid] = '${r['first_name']} ${r['last_name']}';
-        studentMatricules[sid] = r['matricule'] ?? 'N/A';
+        if (studentsMap.containsKey(sid)) {
+          studentsMap[sid]!.add(r);
+        }
       }
 
       List<Map<String, dynamic>> tempRanked = [];

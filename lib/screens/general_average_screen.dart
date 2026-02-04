@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
 import '../services/supabase_service.dart';
-import '../services/coefficient_service.dart';
 import '../theme.dart';
 
 class GeneralAverageScreen extends StatefulWidget {
@@ -44,6 +43,9 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         semester: _selectedSemester,
       );
 
+      // Récupérer les règles de coefficients
+      final allCoeffRules = await SupabaseService.fetchSubjectCoefficients();
+
       final Map<String, List<Map<String, dynamic>>> studentsMap = {};
       final Map<String, String> studentNames = {};
       final Map<String, String> studentMatricules = {};
@@ -81,10 +83,12 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           final d2 = (p['devoir2'] as num?)?.toDouble() ?? 0.0;
 
           final subjectAvg = (interroAvg + d1 + d2) / 3;
-          final coeff = CoefficientService.getCoefficient(
-            subjectName: subjectName,
-            level: widget.schoolClass.level ?? '6ème',
-            cycle: widget.schoolClass.cycle,
+          final subjectId = p['subject_id'] as int;
+
+          final coeff = SupabaseService.findCoefficient(
+            rules: allCoeffRules,
+            subjectId: subjectId,
+            className: widget.schoolClass.name,
           );
 
           _subjectAverages[sid]![subjectName] = subjectAvg;

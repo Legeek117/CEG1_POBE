@@ -3,6 +3,7 @@ import '../services/supabase_service.dart';
 import '../services/persistence_service.dart';
 import '../theme.dart';
 import 'package:flutter/material.dart';
+import '../services/notification_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -73,6 +74,16 @@ class _LoginScreenState extends State<LoginScreen> {
       // Marquer l'utilisateur comme connecté pour le mode hors-ligne
       await PersistenceService.setLoggedIn(true);
 
+      // Mettre à jour le FCM Token pour les notifications
+      try {
+        final fcmToken = await NotificationService.getToken();
+        if (fcmToken != null) {
+          await SupabaseService.updateFcmToken(fcmToken);
+        }
+      } catch (e) {
+        debugPrint("Erreur FCM silencieuse : $e");
+      }
+
       if (!mounted) return;
       widget.onLoginSuccess();
     } on AuthException catch (e) {
@@ -101,6 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
         message = 'Erreur de connexion. Vérifiez votre internet';
       } else if (errorStr.contains('timeout')) {
         message = 'La connexion a pris trop de temps. Réessayez';
+      } else {
+        // Message temporaire pour le débogage
+        message = 'Erreur : $e';
       }
 
       ScaffoldMessenger.of(

@@ -50,6 +50,8 @@ class NotificationService {
           'Notifications CEG1 Pobé',
           importance: Importance.max,
           priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
         );
 
     const NotificationDetails platformChannelSpecifics = NotificationDetails(

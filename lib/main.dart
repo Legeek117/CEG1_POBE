@@ -99,6 +99,17 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         if (session != null) {
           final profile = await SupabaseService.fetchCurrentProfile();
           if (!mounted) return;
+
+          // Mise à jour du token FCM à chaque démarrage si connecté
+          try {
+            final fcmToken = await NotificationService.getToken();
+            if (fcmToken != null) {
+              await SupabaseService.updateFcmToken(fcmToken);
+            }
+          } catch (e) {
+            debugPrint("Erreur FCM au démarrage : $e");
+          }
+
           if (profile?['must_change_password'] == true) {
             setState(() {
               isFirstLogin = true;

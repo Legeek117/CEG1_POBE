@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 
 class SupabaseService {
   static Future<bool> isOnline() async {
@@ -48,6 +49,21 @@ class SupabaseService {
         .eq('id', user.id);
   }
 
+  static Future<void> updateFcmToken(String token) async {
+    final user = client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      await client
+          .from('profiles')
+          .update({'fcm_token': token})
+          .eq('id', user.id);
+    } catch (e) {
+      // Ignorer les erreurs pour ne pas bloquer l'app si la colonne n'existe pas ou erreur réseau
+      // print('Error updating FCM token: $e');
+    }
+  }
+
   // --- Profile ---
   static Future<Map<String, dynamic>?> fetchCurrentProfile() async {
     final user = client.auth.currentUser;
@@ -78,6 +94,10 @@ class SupabaseService {
     return await client.from('censor_unlocks').select('*');
   }
 
+  static Future<List<Map<String, dynamic>>> fetchSubjectCoefficients() async {
+    return await client.from('subject_coefficients').select('*');
+  }
+
   // --- Schools & Classes ---
   static Future<List<Map<String, dynamic>>> fetchTeacherClasses() async {
     final user = client.auth.currentUser;
@@ -99,11 +119,12 @@ class SupabaseService {
 
     final List<dynamic> data = response;
 
-    // 2. Fetcher les coefficients à part ou via une autre méthode
-    // Pour simplifier et éviter les erreurs de jointures complexes inner!
+    // Charger les coefficients dynamiques depuis la DB
+    final allCoeffs = await fetchSubjectCoefficients();
+
     return data.map((e) {
       final classData = Map<String, dynamic>.from(e['classes'] as Map);
-      final subjectId = e['subject_id'];
+      final subjectId = e['subject_id'] as int;
       classData['subject_id'] = subjectId;
       classData['subject_name'] = (e['subjects'] as Map)['name'];
 
@@ -119,12 +140,60 @@ class SupabaseService {
           ? (studentsList[0]['count'] ?? 0)
           : 0;
 
-      // Par défaut coef 1 si on n'a pas pu faire la jointure complexe
-      // (Plus sûr pour éviter de bloquer l'app)
-      classData['coefficient'] = 1;
+      // Détermination dynamique du coefficient via les règles DB
+      classData['coefficient'] = findCoefficient(
+        rules: allCoeffs,
+        subjectId: subjectId,
+        className: classData['name'] ?? '',
+      );
 
       return classData;
     }).toList();
+  }
+
+  static int findCoefficient({
+    required List<Map<String, dynamic>> rules,
+    required int subjectId,
+    required String className,
+  }) {
+    // Filtrer par matière
+    final subjectRules = rules.where((r) => r['subject_id'] == subjectId);
+
+    for (var rule in subjectRules) {
+      // 1. Check Level Pattern (Regex)
+      final levelPattern = rule['level_pattern'] as String;
+      try {
+        final levelRegex = RegExp(levelPattern, caseSensitive: false);
+        if (!levelRegex.hasMatch(className)) continue;
+      } catch (e) {
+        debugPrint("Invalid regex in DB for rule ${rule['id']}: $levelPattern");
+        continue;
+      }
+
+      // 2. Check Series (si défini)
+      final series = rule['series'] as String?;
+      if (series != null && series.isNotEmpty) {
+        // La classe doit contenir la série (ex: "A1")
+        // MAIS attention aux faux positifs (ex: "A12" ne doit pas matcher "A1")
+        // "A1-1", "A1 1", "A1" doivent matcher "A1"
+
+        // Regex : Series + (Fin de chaine OU Non-Word OU Tiret)
+        // On escape la série au cas où elle contient des caractères spéciaux
+        final escapedSeries = RegExp.escape(series);
+        final seriesRegex = RegExp(
+          '$escapedSeries(?:\\b|[^a-zA-Z0-9]|-|\\s|\$)',
+          caseSensitive: false,
+        );
+
+        if (!seriesRegex.hasMatch(className)) continue;
+      }
+
+      // Match trouvé
+      return (rule['value'] as num).toInt();
+    }
+
+    // Aucun match trouvé, valeur par défaut
+    return 1;
   }
 
   static Future<List<Map<String, dynamic>>> fetchStudentsInClass(

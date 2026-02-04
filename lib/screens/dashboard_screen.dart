@@ -1,7 +1,6 @@
 import '../services/supabase_service.dart';
 import '../services/persistence_service.dart';
 import '../models/school_data.dart';
-import '../services/coefficient_service.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import 'package:flutter/material.dart';
@@ -117,11 +116,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               cycle: cycle,
               level: level,
               mainTeacherName: c['main_teacher_name'],
-              coeff: CoefficientService.getCoefficient(
-                subjectName: subjectName,
-                level: level,
-                cycle: cycle,
-              ),
+              coeff: c['coefficient'] ?? 1,
             );
           } else {
             // Ajouter la matière si elle n'est pas déjà présente

@@ -49,6 +49,8 @@ class Evaluation {
   final int semestre;
   final String type; // 'Interrogation' or 'Devoir'
   final int typeIndex; // 1, 2, or 3 for Interro; 1 or 2 for Devoir
+  final Map<String, dynamic>? rawClassData;
+  final String? subjectName;
 
   Evaluation({
     required this.id,
@@ -57,5 +59,7 @@ class Evaluation {
     required this.semestre,
     required this.type,
     required this.typeIndex,
+    this.rawClassData,
+    this.subjectName,
   });
 }

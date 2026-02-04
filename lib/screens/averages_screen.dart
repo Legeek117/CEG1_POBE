@@ -21,6 +21,7 @@ class _AveragesScreenState extends State<AveragesScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _performanceData = [];
   int _selectedSemester = 1;
+  String _sortBy = 'alpha'; // 'alpha' ou 'rank'
 
   @override
   void initState() {
@@ -46,8 +47,38 @@ class _AveragesScreenState extends State<AveragesScreen> {
     }
   }
 
+  void _toggleSort() {
+    setState(() {
+      _sortBy = (_sortBy == 'alpha') ? 'rank' : 'alpha';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    List<Map<String, dynamic>> sortedData = List.from(_performanceData);
+    if (_sortBy == 'alpha') {
+      sortedData.sort((a, b) {
+        final nameA = '${a['first_name']} ${a['last_name']}'.toUpperCase();
+        final nameB = '${b['first_name']} ${b['last_name']}'.toUpperCase();
+        return nameA.compareTo(nameB);
+      });
+    } else {
+      // Tri par moyenne décroissante (rang)
+      sortedData.sort((a, b) {
+        final interroA = (a['interro_avg'] as num?)?.toDouble() ?? 0.0;
+        final d1A = (a['devoir1'] as num?)?.toDouble() ?? 0.0;
+        final d2A = (a['devoir2'] as num?)?.toDouble() ?? 0.0;
+        final avgA = (interroA + d1A + d2A) / 3;
+
+        final interroB = (b['interro_avg'] as num?)?.toDouble() ?? 0.0;
+        final d1B = (b['devoir1'] as num?)?.toDouble() ?? 0.0;
+        final d2B = (b['devoir2'] as num?)?.toDouble() ?? 0.0;
+        final avgB = (interroB + d1B + d2B) / 3;
+
+        return avgB.compareTo(avgA);
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('MOYENNES - ${widget.schoolClass.name}'),
@@ -55,6 +86,15 @@ class _AveragesScreenState extends State<AveragesScreen> {
           onPressed: widget.onBack,
           icon: const Icon(Icons.arrow_back),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _sortBy == 'alpha' ? Icons.sort_by_alpha : Icons.trending_up,
+            ),
+            onPressed: _toggleSort,
+            tooltip: _sortBy == 'alpha' ? 'Trier par Rang' : 'Trier par Nom',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -116,11 +156,11 @@ class _AveragesScreenState extends State<AveragesScreen> {
                 const Divider(height: 1),
                 Expanded(
                   child: ListView.separated(
-                    itemCount: _performanceData.length,
+                    itemCount: sortedData.length,
                     separatorBuilder: (context, index) =>
                         const Divider(height: 1),
                     itemBuilder: (context, index) {
-                      final item = _performanceData[index];
+                      final item = sortedData[index];
                       final studentName =
                           '${item['first_name']} ${item['last_name']}';
                       final interroAvg =

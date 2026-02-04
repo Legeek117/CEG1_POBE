@@ -25,11 +25,21 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   // Stocke les moyennes par matière pour chaque élève : { studentId: { subjectName: avg } }
   Map<String, Map<String, double>> _subjectAverages = {};
   Map<String, Map<String, int>> _subjectCoeffs = {};
+  final Map<String, double> _conductGrades = {};
+  final Map<String, TextEditingController> _conductControllers = {};
+  String _sortBy = 'rank'; // 'rank' ou 'alpha'
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  void _toggleSort() {
+    setState(() {
+      _sortBy = (_sortBy == 'alpha') ? 'rank' : 'alpha';
+    });
   }
 
   Future<void> _loadData() async {
@@ -85,6 +95,13 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           final subjectAvg = (interroAvg + d1 + d2) / 3;
           final subjectId = p['subject_id'] as int;
 
+          // DETECTION CONDUITE (Garantit que les conduites existantes sont chargées)
+          if (subjectId == 13 ||
+              subjectName.toLowerCase().contains('conduite')) {
+            _conductGrades[sid] = subjectAvg;
+            continue; // Ne pas compter comme matière standard dans totalWeightedPoints standard
+          }
+
           final coeff = SupabaseService.findCoefficient(
             rules: allCoeffRules,
             subjectId: subjectId,
@@ -98,7 +115,15 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           totalCoeffs += coeff;
         }
 
-        double ga = totalCoeffs > 0 ? totalWeightedPoints / totalCoeffs : 0.0;
+        double weightedConduct =
+            (_conductGrades[sid] ?? 0.0) * 1; // Coeff Conduite = 1
+        double totalWeightedPointsWithConduct =
+            totalWeightedPoints + weightedConduct;
+        int totalCoeffsWithConduct = totalCoeffs + 1;
+
+        double ga = totalCoeffsWithConduct > 0
+            ? totalWeightedPointsWithConduct / totalCoeffsWithConduct
+            : 0.0;
         tempRanked.add({
           'id': sid,
           'name': studentNames[sid],
@@ -113,9 +138,17 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         tempRanked[i]['rank'] = i + 1;
       }
 
-      setState(() {
-        _rankedList = tempRanked;
-      });
+      if (mounted) {
+        setState(() {
+          _rankedList = tempRanked;
+          // Initialiser les contrôleurs pour chaque élève
+          for (var item in _rankedList) {
+            final sid = item['id'];
+            final val = _conductGrades[sid]?.toStringAsFixed(1) ?? '';
+            _conductControllers[sid] = TextEditingController(text: val);
+          }
+        });
+      }
     } catch (e) {
       debugPrint('Erreur chargement moyennes générales: $e');
     } finally {
@@ -124,7 +157,26 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   }
 
   @override
+  void dispose() {
+    for (var controller in _conductControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    List<Map<String, dynamic>> sortedList = List.from(_rankedList);
+    if (_sortBy == 'alpha') {
+      sortedList.sort(
+        (a, b) => (a['name'] as String).toUpperCase().compareTo(
+          (b['name'] as String).toUpperCase(),
+        ),
+      );
+    } else {
+      sortedList.sort((a, b) => (a['rank'] as int).compareTo(b['rank'] as int));
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('SESSION GÉNÉRALE'),
@@ -132,22 +184,49 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           onPressed: widget.onBack,
           icon: const Icon(Icons.arrow_back),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _sortBy == 'alpha' ? Icons.sort_by_alpha : Icons.trending_up,
+            ),
+            onPressed: _toggleSort,
+            tooltip: _sortBy == 'alpha' ? 'Trier par Rang' : 'Trier par Nom',
+          ),
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.save_outlined),
+              onPressed: _saveConductGrades,
+              tooltip: 'Enregistrer les conduites',
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _rankedList.isEmpty
+          : sortedList.isEmpty
           ? _buildEmptyState()
           : Column(
               children: [
                 _buildSemesterSelector(),
-                _buildSummaryHeader(_rankedList),
+                _buildSummaryHeader(sortedList),
                 Expanded(
                   child: ListView.separated(
-                    itemCount: _rankedList.length,
+                    itemCount: sortedList.length,
                     separatorBuilder: (context, index) =>
                         const Divider(height: 1),
                     itemBuilder: (context, index) {
-                      final item = _rankedList[index];
+                      final item = sortedList[index];
                       return _buildStudentExpansionTile(
                         item['id'],
                         item['name'],
@@ -286,12 +365,56 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         ),
       ),
       title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(
-        'MOY. GÉNÉRALE : ${ga.toStringAsFixed(2)}/20',
-        style: const TextStyle(
-          color: AppTheme.primaryBlue,
-          fontWeight: FontWeight.w500,
-        ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'MOY. GÉNÉRALE : ${ga.toStringAsFixed(2)}/20',
+            style: const TextStyle(
+              color: AppTheme.primaryBlue,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                'Conduite:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 80,
+                height: 35,
+                child: TextField(
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: '--/20',
+                    contentPadding: EdgeInsets.zero,
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onChanged: (v) {
+                    final val = double.tryParse(v);
+                    if (val != null && val >= 0 && val <= 20) {
+                      _conductGrades[id] = val;
+                      _recalculateLocalGA(id);
+                    }
+                  },
+                  controller: _conductControllers[id],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       children: [
         Padding(
@@ -315,6 +438,84 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         ),
       ],
     );
+  }
+
+  void _recalculateLocalGA(String studentId) {
+    // Trouver l'élève dans la liste classée
+    final index = _rankedList.indexWhere((e) => e['id'] == studentId);
+    if (index == -1) return;
+
+    // Recalculer basé sur les moyennes matières existantes
+    double totalWeightedPoints = 0;
+    int totalCoeffs = 0;
+
+    _subjectAverages[studentId]?.forEach((subject, avg) {
+      int coeff = _subjectCoeffs[studentId]?[subject] ?? 1;
+      totalWeightedPoints += (avg * coeff);
+      totalCoeffs += coeff;
+    });
+
+    double weightedConduct = (_conductGrades[studentId] ?? 0.0) * 1;
+    double totalWeightedPointsWithConduct =
+        totalWeightedPoints + weightedConduct;
+    int totalCoeffsWithConduct = totalCoeffs + 1;
+
+    setState(() {
+      _rankedList[index]['ga'] = totalCoeffsWithConduct > 0
+          ? totalWeightedPointsWithConduct / totalCoeffsWithConduct
+          : 0.0;
+    });
+  }
+
+  Future<void> _saveConductGrades() async {
+    if (_conductGrades.isEmpty) return;
+    setState(() => _isSaving = true);
+
+    try {
+      // 1. Identifier subject_id pour "Conduite"
+      // Normalement fixé à 13 ou via une recherche dynamique
+      const conductSubjectId = 13; // Ajustable si besoin
+
+      List<Map<String, dynamic>> conductGradesToSubmit = [];
+      _conductGrades.forEach((sid, note) {
+        conductGradesToSubmit.add({
+          'student_id': sid,
+          'note': note,
+          'is_absent': false,
+        });
+      });
+
+      await SupabaseService.submitEvaluationGrades(
+        classId: int.parse(widget.schoolClass.id),
+        subjectId: conductSubjectId,
+        semester: _selectedSemester,
+        type: 'Devoir', // Utilisation détournée ou type spécifique si dispo
+        index: 3, // Index arbitraire pour la conduite si besoin
+        title: 'Moyenne Conduite S$_selectedSemester',
+        grades: conductGradesToSubmit,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Moyennes de conduite enregistrées !'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Err save conduct: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Erreur lors de l\'enregistrement.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Widget _buildSubjectRow(String subject, double avg, {int coeff = 1}) {

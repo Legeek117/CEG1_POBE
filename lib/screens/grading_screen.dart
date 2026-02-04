@@ -13,6 +13,8 @@ class GradingScreen extends StatefulWidget {
   final String type;
   final int typeIndex;
   final String title;
+  final String? evaluationId; // Optionnel (pour l'historique)
+  final bool isLocked; // Si true, lecture seule
   final VoidCallback onBack;
   final VoidCallback onSubmit;
 
@@ -26,6 +28,8 @@ class GradingScreen extends StatefulWidget {
     required this.onBack,
     required this.onSubmit,
     required this.title,
+    this.evaluationId,
+    this.isLocked = false,
   });
 
   @override
@@ -36,6 +40,46 @@ class _GradingScreenState extends State<GradingScreen> {
   final List<Student> students = List.from(AppState.students);
   String searchQuery = "";
   bool _isSaving = false;
+  bool _isLoadingNotes = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Tri alphabétique par défaut
+    students.sort(
+      (a, b) => a.name.toUpperCase().compareTo(b.name.toUpperCase()),
+    );
+
+    if (widget.evaluationId != null) {
+      _loadExistingGrades();
+    }
+  }
+
+  Future<void> _loadExistingGrades() async {
+    setState(() => _isLoadingNotes = true);
+    try {
+      final grades = await SupabaseService.fetchGradesForEvaluation(
+        widget.evaluationId!,
+      );
+      final Map<String, dynamic> gradeMap = {
+        for (var g in grades) g['student_id'].toString(): g,
+      };
+
+      setState(() {
+        for (var s in students) {
+          if (gradeMap.containsKey(s.id)) {
+            final g = gradeMap[s.id];
+            s.note = (g['note'] as num?)?.toDouble();
+            s.isAbsent = g['is_absent'] ?? false;
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('Erreur chargement notes existantes: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingNotes = false);
+    }
+  }
 
   Future<void> _saveGrades() async {
     setState(() => _isSaving = true);
@@ -184,20 +228,45 @@ class _GradingScreenState extends State<GradingScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: _isLoadingNotes
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _buildSummaryBar(),
+                _buildSearchField(),
+                if (widget.isLocked) _buildLockedOverlay(),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: filteredStudents.length,
+                    itemBuilder: (context, index) {
+                      return _buildStudentCard(filteredStudents[index]);
+                    },
+                  ),
+                ),
+                _buildBottomStats(),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildLockedOverlay() {
+    return Container(
+      width: double.infinity,
+      color: Colors.orange.shade50,
+      padding: const EdgeInsets.all(12),
+      child: const Row(
         children: [
-          _buildSummaryBar(),
-          _buildSearchField(),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: filteredStudents.length,
-              itemBuilder: (context, index) {
-                return _buildStudentCard(filteredStudents[index]);
-              },
+          Icon(Icons.lock_rounded, color: Colors.orange, size: 20),
+          SizedBox(width: 12),
+          Text(
+            'Modification verrouillée par le censeur.',
+            style: TextStyle(
+              color: Colors.orange,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
             ),
           ),
-          _buildBottomStats(),
         ],
       ),
     );
@@ -306,6 +375,7 @@ class _GradingScreenState extends State<GradingScreen> {
             SizedBox(
               width: 70,
               child: TextField(
+                enabled: !widget.isLocked,
                 keyboardType: TextInputType.number,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -335,7 +405,9 @@ class _GradingScreenState extends State<GradingScreen> {
               Switch.adaptive(
                 value: student.isAbsent,
                 activeTrackColor: Colors.red,
-                onChanged: (v) => setState(() => student.isAbsent = v),
+                onChanged: widget.isLocked
+                    ? null
+                    : (v) => setState(() => student.isAbsent = v),
               ),
             ],
           ),

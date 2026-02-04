@@ -286,7 +286,7 @@ class SupabaseService {
     if (user == null) return [];
     return await client
         .from('evaluations')
-        .select('*, classes(name)')
+        .select('*, subjects(name), classes(*)')
         .eq('created_by', user.id)
         .order('date', ascending: false);
   }

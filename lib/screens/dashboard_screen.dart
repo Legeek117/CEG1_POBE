@@ -63,6 +63,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final fetchedClassesData = results[4] as List<dynamic>;
         final locks = results[5] as List<dynamic>;
 
+        // Sauvegarder les coefficients pour usage global
+        AppState.subjectCoefficients =
+            await SupabaseService.fetchSubjectCoefficients();
+
         // Traiter appConfig
         AppState.releaseNotes = appConfig['release_notes'] ?? '';
         AppState.isSessionUnlocked = appConfig['enable_mg_session'] ?? false;

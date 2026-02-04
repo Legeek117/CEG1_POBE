@@ -25,4 +25,5 @@ class AppState {
   };
 
   static List<Evaluation> pastEvaluations = [];
+  static List<Map<String, dynamic>> subjectCoefficients = [];
 }

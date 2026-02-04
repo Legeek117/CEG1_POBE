@@ -76,6 +76,8 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
   String? selectedEvalType;
   int? selectedEvalIndex;
   String? selectedTitle;
+  String? selectedEvalId; // Pour l'historique
+  bool isEvalLocked = false;
 
   @override
   void initState() {
@@ -162,6 +164,40 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         duration: const Duration(seconds: 5),
       ),
     );
+  }
+
+  bool _isEvaluationLocked(String type, int index, int semester) {
+    // 1. Vérifier le semestre global
+    if (!AppState.unlockedSemesters.contains(semester)) return true;
+
+    // 2. Vérifier si l'évaluation spécifique est débloquée
+    final unlockedList = AppState.unlockedEvaluations[type] ?? [];
+    final evalLock = unlockedList.firstWhere(
+      (e) => e['index'] == index,
+      orElse: () => {},
+    );
+
+    if (evalLock.isEmpty)
+      return true; // Pas dans la liste -> Verrouillé par défaut
+
+    // 3. Vérifier les dates (si présentes)
+    final now = DateTime.now();
+    try {
+      if (evalLock['start_date'] != null) {
+        final start = DateTime.parse(evalLock['start_date']);
+        if (now.isBefore(start)) return true;
+      }
+      if (evalLock['end_date'] != null) {
+        final end = DateTime.parse(
+          evalLock['end_date'],
+        ).add(const Duration(days: 1));
+        if (now.isAfter(end)) return true;
+      }
+    } catch (e) {
+      debugPrint("Erreur vérification dates verrouillage : $e");
+    }
+
+    return false; // Débloqué
   }
 
   @override
@@ -280,7 +316,14 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         );
       case 'dashboard':
         return DashboardScreen(
-          onSelectClass: (c) => navigateTo('setup_eval', schoolClass: c),
+          onSelectClass: (c) {
+            setState(() {
+              selectedEvalId = null; // Nouvelle saisie
+              isEvalLocked = false;
+              selectedClass = c;
+            });
+            navigateTo('setup_eval');
+          },
           onViewAverages: (c) => navigateTo('averages', schoolClass: c),
           onSync: () => navigateTo('sync'),
           onNavigate: (page) => navigateTo(page),
@@ -318,6 +361,8 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           title: selectedTitle!,
           onBack: () => navigateTo('setup_eval'),
           onSubmit: () => navigateTo('dashboard'),
+          evaluationId: selectedEvalId,
+          isLocked: isEvalLocked,
         );
       case 'sync':
         return SyncScreen(onFinish: () => navigateTo('dashboard'));
@@ -357,7 +402,27 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           },
         );
       case 'history':
-        return GradeHistoryScreen(onBack: () => navigateTo('dashboard'));
+        return GradeHistoryScreen(
+          onBack: () => navigateTo('dashboard'),
+          onEdit: (eval, sc) {
+            setState(() {
+              selectedClass = sc;
+              selectedSubject = eval.subjectName;
+              selectedSemester = eval.semestre;
+              selectedEvalType = eval.type;
+              selectedEvalIndex = eval.typeIndex;
+              selectedTitle = eval.title;
+              selectedEvalId = eval.id;
+              // Vérifier si le semestre ou l'évaluation spécifique est verrouillé
+              isEvalLocked = _isEvaluationLocked(
+                eval.type,
+                eval.typeIndex,
+                eval.semestre,
+              );
+            });
+            navigateTo('grading');
+          },
+        );
       case 'notifications':
         return NotificationsScreen(onBack: () => navigateTo('dashboard'));
       case 'averages':

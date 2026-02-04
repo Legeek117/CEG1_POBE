@@ -7,8 +7,13 @@ import '../services/supabase_service.dart';
 
 class GradeHistoryScreen extends StatefulWidget {
   final VoidCallback onBack;
+  final Function(Evaluation, SchoolClass) onEdit;
 
-  const GradeHistoryScreen({super.key, required this.onBack});
+  const GradeHistoryScreen({
+    super.key,
+    required this.onBack,
+    required this.onEdit,
+  });
 
   @override
   State<GradeHistoryScreen> createState() => _GradeHistoryScreenState();
@@ -42,9 +47,11 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
             id: e['id'].toString(),
             title: e['title'],
             date: DateTime.parse(e['date']),
-            semestre: e['semester'], // V2: semester
-            type: e['type'], // V2: déjà 'Interrogation' ou 'Devoir'
+            semestre: e['semester'],
+            type: e['type'],
             typeIndex: e['type_index'],
+            subjectName: e['subjects']['name'],
+            rawClassData: e['classes'],
           );
         }).toList();
       });
@@ -207,9 +214,9 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
-                '--', // Moyenne calculée dynamiquement plus tard
-                style: TextStyle(
+              Text(
+                '${eval.type} ${eval.typeIndex}',
+                style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                   color: AppTheme.primaryBlue,
@@ -220,7 +227,28 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
         ),
         trailing: const Icon(Icons.chevron_right, color: Colors.grey),
         onTap: () {
-          // Naviguer vers le détail ou la modification
+          if (eval.rawClassData != null) {
+            final c = eval.rawClassData!;
+            // Déterminer le coefficient comme sur le Dashboard
+            int coeff = SupabaseService.findCoefficient(
+              rules: AppState.subjectCoefficients, // On suppose chargé
+              subjectId: c['subject_id'] ?? 0,
+              className: c['name'] ?? '',
+            );
+
+            final schoolClass = SchoolClass(
+              id: c['id'].toString(),
+              name: c['name'] ?? 'Inconnue',
+              studentCount: 0, // Sera rechargé ou ignoré pour l'édition
+              lastEntryDate: 'N/A',
+              matieres: [eval.subjectName ?? ''],
+              subjectId: c['subject_id'],
+              coeff: coeff,
+              level: c['level'],
+              cycle: c['cycle'],
+            );
+            widget.onEdit(eval, schoolClass);
+          }
         },
       ),
     );

@@ -612,13 +612,36 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         });
       });
 
+      // 1. Sauvegarde Interrogation 1
       await SupabaseService.submitEvaluationGrades(
         classId: int.parse(widget.schoolClass.id),
         subjectId: conductSubjectId,
         semester: _selectedSemester,
-        type: 'Devoir', // Utilisation détournée ou type spécifique si dispo
-        index: 3, // Index arbitraire pour la conduite si besoin
-        title: 'Moyenne Conduite S$_selectedSemester',
+        type: 'Interrogation',
+        index: 1,
+        title: 'Conduite S$_selectedSemester (I1)',
+        grades: conductGradesToSubmit,
+      );
+
+      // 2. Sauvegarde Devoir 1
+      await SupabaseService.submitEvaluationGrades(
+        classId: int.parse(widget.schoolClass.id),
+        subjectId: conductSubjectId,
+        semester: _selectedSemester,
+        type: 'Devoir',
+        index: 1,
+        title: 'Conduite S$_selectedSemester (D1)',
+        grades: conductGradesToSubmit,
+      );
+
+      // 3. Sauvegarde Devoir 2
+      await SupabaseService.submitEvaluationGrades(
+        classId: int.parse(widget.schoolClass.id),
+        subjectId: conductSubjectId,
+        semester: _selectedSemester,
+        type: 'Devoir',
+        index: 2,
+        title: 'Conduite S$_selectedSemester (D2)',
         grades: conductGradesToSubmit,
       );
 

@@ -30,7 +30,7 @@ class SetupEvalScreen extends StatefulWidget {
 
 class _SetupEvalScreenState extends State<SetupEvalScreen> {
   String selectedType = 'Interrogation';
-  int selectedSemestre = 1;
+  late int selectedSemestre; // LATE INIT
   String? selectedMatiere;
   int typeIndex = 1;
   bool _isLoading = false;
@@ -45,6 +45,7 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
   @override
   void initState() {
     super.initState();
+    selectedSemestre = AppState.activeSemester; // DEFAULT TO ACTIVE
     if (widget.schoolClass.matieres.length == 1) {
       selectedMatiere = widget.schoolClass.matieres[0];
     }
@@ -358,10 +359,24 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
   Widget _buildSemestreDropdown() {
     return DropdownButtonFormField<int>(
       initialValue: selectedSemestre,
-      items: [
-        1,
-        2,
-      ].map((v) => DropdownMenuItem(value: v, child: Text('S$v'))).toList(),
+      items: [1, 2].map((v) {
+        final isUnlocked = AppState.unlockedSemesters.contains(v);
+        return DropdownMenuItem(
+          value: v,
+          enabled: isUnlocked,
+          child: Row(
+            children: [
+              if (!isUnlocked)
+                const Icon(Icons.lock, size: 14, color: Colors.red),
+              if (!isUnlocked) const SizedBox(width: 8),
+              Text(
+                'Semestre $v',
+                style: TextStyle(color: isUnlocked ? null : Colors.grey),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
       onChanged: (v) => setState(() => selectedSemestre = v!),
       decoration: const InputDecoration(
         contentPadding: EdgeInsets.symmetric(horizontal: 16),

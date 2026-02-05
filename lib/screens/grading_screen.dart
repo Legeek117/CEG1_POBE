@@ -38,6 +38,7 @@ class GradingScreen extends StatefulWidget {
 
 class _GradingScreenState extends State<GradingScreen> {
   final List<Student> students = List.from(AppState.students);
+  final Map<String, TextEditingController> _controllers = {};
   String searchQuery = "";
   bool _isSaving = false;
   bool _isLoadingNotes = false;
@@ -50,9 +51,24 @@ class _GradingScreenState extends State<GradingScreen> {
       (a, b) => a.name.toUpperCase().compareTo(b.name.toUpperCase()),
     );
 
+    // Initialiser les contrôleurs
+    for (var s in students) {
+      _controllers[s.id] = TextEditingController(
+        text: s.note?.toStringAsFixed(1) ?? '',
+      );
+    }
+
     if (widget.evaluationId != null) {
       _loadExistingGrades();
     }
+  }
+
+  @override
+  void dispose() {
+    for (var c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _loadExistingGrades() async {
@@ -62,15 +78,23 @@ class _GradingScreenState extends State<GradingScreen> {
         widget.evaluationId!,
       );
       final Map<String, dynamic> gradeMap = {
-        for (var g in grades) g['student_id'].toString(): g,
+        for (var g in grades) g['student_id'].toString().toLowerCase(): g,
       };
 
       setState(() {
         for (var s in students) {
-          if (gradeMap.containsKey(s.id)) {
-            final g = gradeMap[s.id];
+          final studentIdLower = s.id.toLowerCase();
+          if (gradeMap.containsKey(studentIdLower)) {
+            final g = gradeMap[studentIdLower];
             s.note = (g['note'] as num?)?.toDouble();
             s.isAbsent = g['is_absent'] ?? false;
+            // Mettre à jour le contrôleur
+            _controllers[s.id]?.text = s.note?.toStringAsFixed(1) ?? '';
+          } else {
+            // Reset if not found in this evaluation
+            s.note = null;
+            s.isAbsent = false;
+            _controllers[s.id]?.text = '';
           }
         }
       });
@@ -131,11 +155,11 @@ class _GradingScreenState extends State<GradingScreen> {
           classId: int.parse(widget.schoolClass.id),
           subjectId: widget.schoolClass.subjectId!,
           semester: widget.semester,
-          type: widget
-              .type, // "Interrogation" ou "Devoir" (Respecte la Casse du V2)
+          type: widget.type,
           index: widget.typeIndex,
           title: widget.title,
           grades: gradesList,
+          evaluationId: widget.evaluationId, // PASSAGE DE L'ID
         );
       } else {
         // MODE HORS-LIGNE : Stockage de l'évaluation entière
@@ -180,8 +204,12 @@ class _GradingScreenState extends State<GradingScreen> {
       }
 
       setState(() => _isSaving = false);
+      debugPrint('Save error: $e'); // LOG ICI
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('$errorMessage: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -391,8 +419,12 @@ class _GradingScreenState extends State<GradingScreen> {
                     vertical: 8,
                   ),
                 ),
-                onChanged: (v) =>
-                    setState(() => student.note = double.tryParse(v)),
+                onChanged: (v) {
+                  student.note = double.tryParse(v);
+                  // Pas de setState ici pour éviter de perdre le focus si on re-build tout
+                  // mais on veut quand même que le footer se mette à jour
+                },
+                controller: _controllers[student.id],
               ),
             ),
           const SizedBox(width: 8),

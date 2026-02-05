@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
+import '../app_state.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
 
@@ -20,8 +21,10 @@ class AveragesScreen extends StatefulWidget {
 class _AveragesScreenState extends State<AveragesScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _performanceData = [];
+  List<Map<String, dynamic>> _coeffRules = []; // AJOUT
   int _selectedSemester = 1;
   String _sortBy = 'alpha'; // 'alpha' ou 'rank'
+  int _calculatedCoeff = 1; // AJOUT
 
   @override
   void initState() {
@@ -32,13 +35,51 @@ class _AveragesScreenState extends State<AveragesScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final data = await SupabaseService.fetchStudentPerformance(
+      // 1. Charger rules si nécessaire
+      if (_coeffRules.isEmpty) {
+        _coeffRules = await SupabaseService.fetchSubjectCoefficients();
+      }
+
+      // 2. Calculer le vrai coeff pour cette classe/matière
+      _calculatedCoeff = SupabaseService.findCoefficient(
+        rules: _coeffRules,
+        subjectId: widget.schoolClass.subjectId!,
+        className: widget.schoolClass.name,
+      );
+
+      // 3. Charger les étudiants de la classe d'abord (Garantit la liste)
+      final studentsList = await SupabaseService.fetchStudentsInClass(
+        int.parse(widget.schoolClass.id),
+      );
+
+      // 4. Charger perfs
+      final perfs = await SupabaseService.fetchStudentPerformance(
         classId: int.parse(widget.schoolClass.id),
         subjectId: widget.schoolClass.subjectId!,
         semester: _selectedSemester,
       );
+
+      // 5. Fusionner pour ne rater personne
+      final Map<String, Map<String, dynamic>> perfMap = {
+        for (var p in perfs) (p['student_id'] ?? '').toString(): p,
+      };
+
+      final List<Map<String, dynamic>> mergedData = studentsList.map((s) {
+        final sid = s['id'].toString();
+        final p = perfMap[sid];
+
+        return {
+          'first_name': s['first_name'],
+          'last_name': s['last_name'],
+          'matricule': s['matricule'],
+          'interro_avg': p?['interro_avg'] ?? 0.0,
+          'devoir1': p?['devoir1'] ?? 0.0,
+          'devoir2': p?['devoir2'] ?? 0.0,
+        };
+      }).toList();
+
       setState(() {
-        _performanceData = data;
+        _performanceData = mergedData;
       });
     } catch (e) {
       debugPrint('Error loading averages: $e');
@@ -79,6 +120,10 @@ class _AveragesScreenState extends State<AveragesScreen> {
       });
     }
 
+    final bool isLocked = !AppState.unlockedSemesters.contains(
+      _selectedSemester,
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: Text('MOYENNES - ${widget.schoolClass.name}'),
@@ -91,7 +136,7 @@ class _AveragesScreenState extends State<AveragesScreen> {
             icon: Icon(
               _sortBy == 'alpha' ? Icons.sort_by_alpha : Icons.trending_up,
             ),
-            onPressed: _toggleSort,
+            onPressed: isLocked ? null : _toggleSort,
             tooltip: _sortBy == 'alpha' ? 'Trier par Rang' : 'Trier par Nom',
           ),
         ],
@@ -101,89 +146,119 @@ class _AveragesScreenState extends State<AveragesScreen> {
           : Column(
               children: [
                 _buildSemesterSelector(),
-                _buildInfoCard(),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          'Élève',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.grey,
+                if (isLocked)
+                  Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.lock_outline,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Ce semestre est verrouillé.',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Text(
+                            'Les notes ne sont pas encore accessibles.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else ...[
+                  _buildInfoCard(),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            'Élève',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          'Interro',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.grey,
+                        Expanded(
+                          child: Text(
+                            'Interro',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          'Moy.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.grey,
+                        Expanded(
+                          child: Text(
+                            'Moy.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          'Coeff.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.grey,
+                        Expanded(
+                          child: Text(
+                            'Moy. PP', // Label plus précis
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: sortedData.length,
-                    separatorBuilder: (context, index) =>
-                        const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final item = sortedData[index];
-                      final studentName =
-                          '${item['first_name']} ${item['last_name']}';
-                      final interroAvg =
-                          (item['interro_avg'] as num?)?.toDouble() ?? 0.0;
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: sortedData.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = sortedData[index];
+                        final studentName =
+                            '${item['first_name']} ${item['last_name']}';
+                        final interroAvg =
+                            (item['interro_avg'] as num?)?.toDouble() ?? 0.0;
 
-                      // Calcul de la moyenne de matière (V2)
-                      // Formule : (MoyInterro + Devoir1 + Devoir2) / 3
-                      final d1 = (item['devoir1'] as num?)?.toDouble() ?? 0.0;
-                      final d2 = (item['devoir2'] as num?)?.toDouble() ?? 0.0;
+                        // Calcul de la moyenne de matière (V2)
+                        // Formule : (MoyInterro + Devoir1 + Devoir2) / 3
+                        final d1 = (item['devoir1'] as num?)?.toDouble() ?? 0.0;
+                        final d2 = (item['devoir2'] as num?)?.toDouble() ?? 0.0;
 
-                      final subjectAvg = (interroAvg + d1 + d2) / 3;
-                      final weightedAvg = subjectAvg * widget.schoolClass.coeff;
+                        final subjectAvg = (interroAvg + d1 + d2) / 3;
+                        final weightedAvg = subjectAvg * _calculatedCoeff;
 
-                      return _buildStudentRow(
-                        studentName,
-                        item['matricule'] ?? 'N/A',
-                        interroAvg,
-                        subjectAvg,
-                        weightedAvg,
-                      );
-                    },
+                        return _buildStudentRow(
+                          studentName,
+                          item['matricule'] ?? 'N/A',
+                          interroAvg,
+                          subjectAvg,
+                          weightedAvg,
+                        );
+                      },
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
     );
@@ -196,14 +271,14 @@ class _AveragesScreenState extends State<AveragesScreen> {
       child: Row(
         children: [
           const Text(
-            'SEMESTRE',
+            'PERIOD', // Concis pour éviter overflow
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: FontWeight.bold,
               color: Colors.grey,
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 8),
           Expanded(
             child: Row(
               children: [1, 2].map((sem) {
@@ -225,15 +300,31 @@ class _AveragesScreenState extends State<AveragesScreen> {
                               : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(
-                          'S$sem',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black87,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (!AppState.unlockedSemesters.contains(sem))
+                              const Padding(
+                                padding: EdgeInsets.only(right: 4),
+                                child: Icon(
+                                  Icons.lock,
+                                  size: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            Text(
+                              'S$sem',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.black87,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -283,7 +374,7 @@ class _AveragesScreenState extends State<AveragesScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Coeff: ${widget.schoolClass.coeff}',
+                  'Coeff: $_calculatedCoeff',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
@@ -295,8 +386,16 @@ class _AveragesScreenState extends State<AveragesScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '(Moy. Interros + Somme 2 Devoirs) / 3',
+            '(Moy. Interros + Moy. Devoirs) / 3',
             style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const Text(
+            'Points Pondérés (PP) = Moy. x Coeff',
+            style: TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),

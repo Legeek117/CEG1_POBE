@@ -17,6 +17,7 @@ class AppState {
   static String currentAcademicYear = "";
   static String releaseNotes = "";
   static List<int> unlockedSemesters = [];
+  static int activeSemester = 1; // SEMESTRE ACTIF (Bouclage)
 
   // Stocke les détails des verrous (index, start_date, end_date)
   static Map<String, List<Map<String, dynamic>>> unlockedEvaluations = {

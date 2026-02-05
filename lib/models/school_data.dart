@@ -51,6 +51,7 @@ class Evaluation {
   final int typeIndex; // 1, 2, or 3 for Interro; 1 or 2 for Devoir
   final Map<String, dynamic>? rawClassData;
   final String? subjectName;
+  final int? subjectId; // AJOUT
 
   Evaluation({
     required this.id,
@@ -61,5 +62,6 @@ class Evaluation {
     required this.typeIndex,
     this.rawClassData,
     this.subjectName,
+    this.subjectId,
   });
 }

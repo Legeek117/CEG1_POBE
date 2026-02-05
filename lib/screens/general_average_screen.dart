@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/school_data.dart';
+import '../app_state.dart';
 import '../services/supabase_service.dart';
 import '../theme.dart';
 
@@ -27,6 +28,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   Map<String, Map<String, int>> _subjectCoeffs = {};
   final Map<String, double> _conductGrades = {};
   final Map<String, TextEditingController> _conductControllers = {};
+  final Map<String, double> _s1GeneralAverages = {}; // AJOUT
   String _sortBy = 'rank'; // 'rank' ou 'alpha'
   bool _isSaving = false;
 
@@ -48,13 +50,28 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       final studentsList = await SupabaseService.fetchStudentsInClass(
         int.parse(widget.schoolClass.id),
       );
+
+      // Récupérer les règles de coefficients
+      final allCoeffRules = await SupabaseService.fetchSubjectCoefficients();
+
+      // CHARGEMENT SEMESTRE SÉLECTIONNÉ
       final records = await SupabaseService.fetchClassPerformanceRecords(
         classId: int.parse(widget.schoolClass.id),
         semester: _selectedSemester,
       );
 
-      // Récupérer les règles de coefficients
-      final allCoeffRules = await SupabaseService.fetchSubjectCoefficients();
+      // SI S2, ON CHARGE AUSSI S1 POUR LA MOYENNE ANNUELLE
+      Map<String, List<Map<String, dynamic>>> studentsS1Map = {};
+      if (_selectedSemester == 2) {
+        final recordsS1 = await SupabaseService.fetchClassPerformanceRecords(
+          classId: int.parse(widget.schoolClass.id),
+          semester: 1,
+        );
+        for (var r in recordsS1) {
+          final sid = r['student_id'].toString();
+          studentsS1Map.putIfAbsent(sid, () => []).add(r);
+        }
+      }
 
       final Map<String, List<Map<String, dynamic>>> studentsMap = {};
       final Map<String, String> studentNames = {};
@@ -79,8 +96,46 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       List<Map<String, dynamic>> tempRanked = [];
       _subjectAverages = {};
       _subjectCoeffs = {};
+      _conductGrades.clear();
+      _s1GeneralAverages.clear();
 
-      studentsMap.forEach((sid, performances) {
+      for (var sid in studentNames.keys) {
+        final performances = studentsMap[sid]!;
+
+        // --- CALCUL S1 (Si S2 view) ---
+        if (_selectedSemester == 2) {
+          double s1Points = 0;
+          int s1Coeffs = 0;
+          double s1Conduct = 0;
+          final s1Perfs = studentsS1Map[sid] ?? [];
+          for (var p in s1Perfs) {
+            final subName = (p['subjects']['name'] as String).toLowerCase();
+            final subId = p['subject_id'] as int;
+
+            final double interro =
+                (p['interro_avg'] as num?)?.toDouble() ?? 0.0;
+            final double d1 = (p['devoir1'] as num?)?.toDouble() ?? 0.0;
+            final double d2 = (p['devoir2'] as num?)?.toDouble() ?? 0.0;
+            final double avg = (interro + d1 + d2) / 3;
+
+            if (subId == 13 || subName.contains('conduite')) {
+              s1Conduct = avg;
+            } else {
+              final c = SupabaseService.findCoefficient(
+                rules: allCoeffRules,
+                subjectId: subId,
+                className: widget.schoolClass.name,
+              );
+              s1Points += (avg * c);
+              s1Coeffs += c;
+            }
+          }
+          _s1GeneralAverages[sid] = (s1Coeffs + 1) > 0
+              ? (s1Points + (s1Conduct * 1)) / (s1Coeffs + 1)
+              : 0.0;
+        }
+
+        // --- CALCUL SEMESTRE ACTUEL ---
         double totalWeightedPoints = 0;
         int totalCoeffs = 0;
         _subjectAverages[sid] = {};
@@ -124,13 +179,22 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         double ga = totalCoeffsWithConduct > 0
             ? totalWeightedPointsWithConduct / totalCoeffsWithConduct
             : 0.0;
+
+        // MOYENNE ANNUELLE (si S2)
+        double? annualAvg;
+        if (_selectedSemester == 2) {
+          final s1GA = _s1GeneralAverages[sid] ?? 0.0;
+          annualAvg = ((ga * 2) + s1GA) / 3;
+        }
+
         tempRanked.add({
           'id': sid,
           'name': studentNames[sid],
           'matricule': studentMatricules[sid],
           'ga': ga,
+          'ma': annualAvg,
         });
-      });
+      }
 
       // Tri et Rang
       tempRanked.sort((a, b) => b['ga'].compareTo(a['ga']));
@@ -141,7 +205,12 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       if (mounted) {
         setState(() {
           _rankedList = tempRanked;
-          // Initialiser les contrôleurs pour chaque élève
+          // Libérer anciens contrôleurs
+          for (var c in _conductControllers.values) {
+            c.dispose();
+          }
+          _conductControllers.clear();
+          // Initialiser les nouveaux contrôleurs
           for (var item in _rankedList) {
             final sid = item['id'];
             final val = _conductGrades[sid]?.toStringAsFixed(1) ?? '';
@@ -166,6 +235,12 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    bool isAnnual = _selectedSemester == 3;
+    bool isLocked = !AppState.unlockedSemesters.contains(_selectedSemester);
+    if (isAnnual) {
+      isLocked = !AppState.unlockedSemesters.contains(2);
+    }
+
     List<Map<String, dynamic>> sortedList = List.from(_rankedList);
     if (_sortBy == 'alpha') {
       sortedList.sort(
@@ -174,7 +249,17 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
         ),
       );
     } else {
-      sortedList.sort((a, b) => (a['rank'] as int).compareTo(b['rank'] as int));
+      // Tri par Moyenne (GA ou MA selon mode)
+      bool isAnnual = _selectedSemester == 3;
+      sortedList.sort((a, b) {
+        final valA = (isAnnual ? a['ma'] ?? 0.0 : a['ga']) as double;
+        final valB = (isAnnual ? b['ma'] ?? 0.0 : b['ga']) as double;
+        return valB.compareTo(valA);
+      });
+      // Ré-assigner les rangs temporairement pour l'UI
+      for (int i = 0; i < sortedList.length; i++) {
+        sortedList[i]['rank'] = i + 1;
+      }
     }
 
     return Scaffold(
@@ -192,24 +277,25 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
             onPressed: _toggleSort,
             tooltip: _sortBy == 'alpha' ? 'Trier par Rang' : 'Trier par Nom',
           ),
-          if (_isSaving)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.save_outlined),
-              onPressed: _saveConductGrades,
-              tooltip: 'Enregistrer les conduites',
-            ),
+          if (_selectedSemester < 3 &&
+              AppState.unlockedSemesters.contains(_selectedSemester))
+            _isSaving
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.save_outlined),
+                    onPressed: _saveConductGrades,
+                    tooltip: 'Enregistrer les conduites',
+                  ),
         ],
       ),
       body: _isLoading
@@ -220,23 +306,48 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
               children: [
                 _buildSemesterSelector(),
                 _buildSummaryHeader(sortedList),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: sortedList.length,
-                    separatorBuilder: (context, index) =>
-                        const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final item = sortedList[index];
-                      return _buildStudentExpansionTile(
-                        item['id'],
-                        item['name'],
-                        item['matricule'],
-                        item['ga'],
-                        item['rank'],
-                      );
-                    },
+                if (isLocked)
+                  Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.lock_outline,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            isAnnual
+                                ? 'Moyennes Annuelles Verrouillées'
+                                : 'Semestre Verrouillé',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Text(
+                            'L\'accès aux résultats est restreint pour le moment.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: sortedList.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = sortedList[index];
+                        return _buildStudentExpansionTile(item);
+                      },
+                    ),
                   ),
-                ),
               ],
             ),
     );
@@ -253,7 +364,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       child: Row(
         children: [
           const Text(
-            'SEMESTRE',
+            'PÉRIODE',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -263,14 +374,21 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
           const SizedBox(width: 16),
           Expanded(
             child: Row(
-              children: [1, 2].map((sem) {
-                final isSelected = _selectedSemester == sem;
+              children: [1, 2, 3].map((mode) {
+                // mode 3 = Annuel
+                if (mode == 3 && !AppState.unlockedSemesters.contains(2)) {
+                  return const SizedBox.shrink();
+                }
+
+                final isSelected = _selectedSemester == mode;
+                String label = mode == 3 ? 'ANNUEL' : 'S$mode';
+
                 return Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(right: sem == 1 ? 8 : 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: InkWell(
                       onTap: () {
-                        setState(() => _selectedSemester = sem);
+                        setState(() => _selectedSemester = mode);
                         _loadData();
                       },
                       borderRadius: BorderRadius.circular(8),
@@ -278,19 +396,39 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? AppTheme.primaryBlue
+                              ? mode == 3
+                                    ? Colors.green
+                                    : AppTheme.primaryBlue
                               : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(
-                          'S$sem',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black87,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (mode < 3 &&
+                                !AppState.unlockedSemesters.contains(mode))
+                              const Padding(
+                                padding: EdgeInsets.only(right: 4),
+                                child: Icon(
+                                  Icons.lock,
+                                  size: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            Text(
+                              label,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: mode == 3 ? 11 : 13,
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.black87,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -305,20 +443,36 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   }
 
   Widget _buildSummaryHeader(List<Map<String, dynamic>> list) {
+    bool isAnnual = _selectedSemester == 3;
     double classAvg = list.isEmpty
         ? 0
-        : list.map((e) => e['ga'] as double).reduce((a, b) => a + b) /
+        : list
+                  .map((e) => (isAnnual ? e['ma'] ?? 0.0 : e['ga']) as double)
+                  .reduce((a, b) => a + b) /
               list.length;
+
+    bool isLocked = !AppState.unlockedSemesters.contains(_selectedSemester);
+    if (isAnnual) isLocked = !AppState.unlockedSemesters.contains(2);
 
     return Container(
       padding: const EdgeInsets.all(20),
-      color: AppTheme.primaryBlue.withValues(alpha: 0.05),
+      color: (isAnnual ? Colors.green : AppTheme.primaryBlue).withValues(
+        alpha: 0.05,
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildHeaderStat('Moy. Classe', classAvg.toStringAsFixed(2)),
+          _buildHeaderStat(
+            isAnnual ? 'Moy. Annuelle Classe' : 'Moy. Classe',
+            classAvg.toStringAsFixed(2),
+            color: isAnnual ? Colors.green : null,
+          ),
           _buildHeaderStat('Effectif', '${list.length}'),
-          _buildHeaderStat('Statut', 'Ouvert', color: Colors.green),
+          _buildHeaderStat(
+            'Statut',
+            isLocked ? 'Verrouillé' : 'Ouvert',
+            color: isLocked ? Colors.orange : Colors.green,
+          ),
         ],
       ),
     );
@@ -327,7 +481,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
   Widget _buildHeaderStat(String label, String value, {Color? color}) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
         Text(
           value,
           style: TextStyle(
@@ -340,15 +494,17 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
     );
   }
 
-  Widget _buildStudentExpansionTile(
-    String id,
-    String name,
-    String matricule,
-    double ga,
-    int rank,
-  ) {
+  Widget _buildStudentExpansionTile(Map<String, dynamic> item) {
+    final String id = item['id'];
+    final String name = item['name'];
+    final int rank = item['rank'];
+    final double ga = item['ga'];
+
     final sAverages = _subjectAverages[id] ?? {};
     final sCoeffs = _subjectCoeffs[id] ?? {};
+
+    final bool isAnnual = _selectedSemester == 3;
+    final double displayAvg = isAnnual ? (item['ma'] ?? 0.0) : ga;
 
     return ExpansionTile(
       leading: CircleAvatar(
@@ -368,52 +524,23 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'MOY. GÉNÉRALE : ${ga.toStringAsFixed(2)}/20',
-            style: const TextStyle(
-              color: AppTheme.primaryBlue,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Conduite:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 80,
-                height: 35,
-                child: TextField(
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: '--/20',
-                    contentPadding: EdgeInsets.zero,
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  onChanged: (v) {
-                    final val = double.tryParse(v);
-                    if (val != null && val >= 0 && val <= 20) {
-                      _conductGrades[id] = val;
-                      _recalculateLocalGA(id);
-                    }
-                  },
-                  controller: _conductControllers[id],
+              Text(
+                isAnnual
+                    ? 'MOY. ANNUELLE : ${displayAvg.toStringAsFixed(2)}/20'
+                    : 'MOY. SEMESTRE : ${displayAvg.toStringAsFixed(2)}/20',
+                style: TextStyle(
+                  color: isAnnual ? Colors.green : AppTheme.primaryBlue,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
+              if (!isAnnual && _selectedSemester == 2)
+                _buildAnnualMiniBadge(item['ma']),
             ],
           ),
+          if (!isAnnual) ...[const SizedBox(height: 8), _buildConductInput(id)],
         ],
       ),
       children: [
@@ -516,6 +643,65 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Widget _buildAnnualMiniBadge(double? ma) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Text(
+        'ANNUELLE: ${ma?.toStringAsFixed(2) ?? '--'}/20',
+        style: TextStyle(
+          color: Colors.green.shade800,
+          fontWeight: FontWeight.bold,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConductInput(String id) {
+    bool isLocked = !AppState.unlockedSemesters.contains(_selectedSemester);
+    return Row(
+      children: [
+        const Text(
+          'Conduite:',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 80,
+          height: 35,
+          child: TextField(
+            enabled: !isLocked,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              hintText: '--/20',
+              contentPadding: EdgeInsets.zero,
+              filled: true,
+              fillColor: isLocked ? Colors.grey.shade100 : Colors.grey.shade50,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onChanged: (v) {
+              final val = double.tryParse(v);
+              if (val != null && val >= 0 && val <= 20) {
+                _conductGrades[id] = val;
+                _recalculateLocalGA(id);
+              }
+            },
+            controller: _conductControllers[id],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildSubjectRow(String subject, double avg, {int coeff = 1}) {

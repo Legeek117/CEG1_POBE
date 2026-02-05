@@ -50,7 +50,8 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
             semestre: e['semester'],
             type: e['type'],
             typeIndex: e['type_index'],
-            subjectName: e['subjects']['name'],
+            subjectName: e['subjects'] != null ? e['subjects']['name'] : 'N/A',
+            subjectId: e['subject_id'], // RÉCUPÉRATION DIRECTE
             rawClassData: e['classes'],
           );
         }).toList();
@@ -231,18 +232,18 @@ class _GradeHistoryScreenState extends State<GradeHistoryScreen> {
             final c = eval.rawClassData!;
             // Déterminer le coefficient comme sur le Dashboard
             int coeff = SupabaseService.findCoefficient(
-              rules: AppState.subjectCoefficients, // On suppose chargé
-              subjectId: c['subject_id'] ?? 0,
+              rules: AppState.subjectCoefficients,
+              subjectId: eval.subjectId ?? 0,
               className: c['name'] ?? '',
             );
 
             final schoolClass = SchoolClass(
               id: c['id'].toString(),
               name: c['name'] ?? 'Inconnue',
-              studentCount: 0, // Sera rechargé ou ignoré pour l'édition
+              studentCount: 0,
               lastEntryDate: 'N/A',
               matieres: [eval.subjectName ?? ''],
-              subjectId: c['subject_id'],
+              subjectId: eval.subjectId,
               coeff: coeff,
               level: c['level'],
               cycle: c['cycle'],

@@ -81,6 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (settings['is_semester2_locked'] != true) {
           AppState.unlockedSemesters.add(2);
         }
+        AppState.activeSemester = settings['current_semester'] ?? 1;
         await PersistenceService.saveSettings(settings);
 
         // Traiter profile
@@ -161,36 +162,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final List<SchoolClass> classes = groupedClasses.values.toList();
 
-        // OPTIMISATION : Calcul de santé en parallèle
-        final currentSemester = AppState.unlockedSemesters.isNotEmpty
-            ? AppState.unlockedSemesters.last
-            : 1;
-
-        final healthFutures = classes.map((cls) async {
-          final subjectsCount = cls.matieres.length;
-          final expected = cls.studentCount * subjectsCount * 4;
-          if (expected > 0) {
-            final actual = await SupabaseService.countEnteredGrades(
-              classId: int.parse(cls.id),
-              semester: currentSemester,
-            );
-            double ratio = actual / expected;
-            if (ratio > 1.0) ratio = 1.0;
-            return MapEntry(cls.id, ratio);
-          }
-          return MapEntry(cls.id, 0.0);
-        }).toList();
-
-        final healthResults = await Future.wait(healthFutures);
-        final Map<String, double> classesHealth = Map.fromEntries(
-          healthResults,
-        );
-
         if (mounted) {
           setState(() {
             _classes = classes;
-            _classesHealth = classesHealth;
+            // Initialiser la santé à 0 puis charger en arrière-plan
+            _classesHealth = {for (var c in classes) c.id: 0.0};
           });
+
+          // Lancer le chargement de la santé en arrière-plan
+          _loadClassesHealth(classes);
         }
 
         AppState.classes = classes;
@@ -279,6 +259,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadClassesHealth(List<SchoolClass> classes) async {
+    if (!_isOnline) return;
+
+    final currentSemester = AppState.unlockedSemesters.isNotEmpty
+        ? AppState.unlockedSemesters.last
+        : 1;
+
+    for (var cls in classes) {
+      try {
+        final subjectsCount = cls.matieres.length;
+        final expected = cls.studentCount * subjectsCount * 4;
+
+        if (expected > 0) {
+          final actual = await SupabaseService.countEnteredGrades(
+            classId: int.parse(cls.id),
+            semester: currentSemester,
+          );
+
+          double ratio = actual / expected;
+          if (ratio > 1.0) ratio = 1.0;
+
+          if (mounted) {
+            setState(() {
+              _classesHealth[cls.id] = ratio;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('Erreur calcul santé pour ${cls.name}: $e');
+      }
     }
   }
 

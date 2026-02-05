@@ -78,6 +78,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
   String? selectedTitle;
   String? selectedEvalId; // Pour l'historique
   bool isEvalLocked = false;
+  String fromPage = 'dashboard';
 
   @override
   void initState() {
@@ -168,7 +169,9 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
 
   bool _isEvaluationLocked(String type, int index, int semester) {
     // 1. Vérifier le semestre global
-    if (!AppState.unlockedSemesters.contains(semester)) return true;
+    if (!AppState.unlockedSemesters.contains(semester)) {
+      return true;
+    }
 
     // 2. Vérifier si l'évaluation spécifique est débloquée
     final unlockedList = AppState.unlockedEvaluations[type] ?? [];
@@ -318,6 +321,7 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
         return DashboardScreen(
           onSelectClass: (c) {
             setState(() {
+              fromPage = 'dashboard';
               selectedEvalId = null; // Nouvelle saisie
               isEvalLocked = false;
               selectedClass = c;
@@ -359,7 +363,8 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
           type: selectedEvalType!,
           typeIndex: selectedEvalIndex!,
           title: selectedTitle!,
-          onBack: () => navigateTo('setup_eval'),
+          onBack: () =>
+              navigateTo(fromPage == 'history' ? 'history' : 'setup_eval'),
           onSubmit: () => navigateTo('dashboard'),
           evaluationId: selectedEvalId,
           isLocked: isEvalLocked,
@@ -404,7 +409,26 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
       case 'history':
         return GradeHistoryScreen(
           onBack: () => navigateTo('dashboard'),
-          onEdit: (eval, sc) {
+          onEdit: (eval, sc) async {
+            setState(() => fromPage = 'history');
+            // Charger les élèves de la classe avant d'éditer
+            try {
+              final students = await SupabaseService.fetchStudentsInClass(
+                int.parse(sc.id),
+              );
+              AppState.students = students
+                  .map(
+                    (s) => Student(
+                      id: s['id'].toString(),
+                      matricule: s['matricule'],
+                      name: '${s['first_name']} ${s['last_name']}',
+                    ),
+                  )
+                  .toList();
+            } catch (e) {
+              debugPrint("Erreur chargement élèves depuis historique : $e");
+            }
+
             setState(() {
               selectedClass = sc;
               selectedSubject = eval.subjectName;

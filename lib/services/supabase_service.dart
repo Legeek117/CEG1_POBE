@@ -4,8 +4,15 @@ import 'package:flutter/foundation.dart';
 
 class SupabaseService {
   static Future<bool> isOnline() async {
-    final connectivityResult = await Connectivity().checkConnectivity();
-    return !connectivityResult.contains(ConnectivityResult.none);
+    try {
+      final connectivityResult = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(seconds: 3));
+      return !connectivityResult.contains(ConnectivityResult.none);
+    } catch (e) {
+      debugPrint("Connectivity check timed out or failed: $e");
+      return false; // On considère offline en cas de hang/erreur
+    }
   }
 
   static const String _url = 'https://lnyqpzsrcmcmkngbcyqn.supabase.co';
@@ -25,10 +32,9 @@ class SupabaseService {
 
   // --- Auth ---
   static Future<AuthResponse> signIn(String email, String password) async {
-    return await client.auth.signInWithPassword(
-      email: email,
-      password: password,
-    );
+    return await client.auth
+        .signInWithPassword(email: email, password: password)
+        .timeout(const Duration(seconds: 10));
   }
 
   static Future<void> signOut() async {
@@ -216,53 +222,62 @@ class SupabaseService {
     required int index,
     required String title,
     required List<Map<String, dynamic>> grades,
+    String? evaluationId, // Optionnel
   }) async {
     final user = client.auth.currentUser;
     if (user == null) throw Exception("Non authentifié");
 
-    // 1. Créer ou Récupérer l'évaluation (Upsert implicite sur unique keys?)
-    // Le schéma a UNIQUE(type, index) sur censor_unlocks, mais sur evaluations ??
-    // Le script SQL ne montre pas d'UNIQUE sur evaluations(class, subject, semester, type, index)
-    // On va donc faire: Select -> If empty -> Insert -> Return ID
+    String finalEvalId;
 
-    // Tentative de récupération
-    final existingEval = await client
-        .from('evaluations')
-        .select('id')
-        .eq('class_id', classId)
-        .eq('subject_id', subjectId)
-        .eq('semester', semester)
-        .eq('type', type)
-        .eq('type_index', index)
-        .maybeSingle();
-
-    String evaluationId;
-
-    if (existingEval != null) {
-      evaluationId = existingEval['id'];
-    } else {
-      // Création
-      final newEval = await client
+    if (evaluationId != null) {
+      finalEvalId = evaluationId;
+      // Optionnel: Mettre à jour le titre
+      await client
           .from('evaluations')
-          .insert({
-            'title': title,
-            'date': DateTime.now().toIso8601String(),
-            'semester': semester,
-            'type': type,
-            'type_index': index,
-            'class_id': classId,
-            'subject_id': subjectId,
-            'created_by': user.id,
-          })
+          .update({'title': title, 'date': DateTime.now().toIso8601String()})
+          .eq('id', finalEvalId);
+    } else {
+      // Chercher si elle existe déjà par ses propriétés
+      final existingEval = await client
+          .from('evaluations')
           .select('id')
-          .single();
-      evaluationId = newEval['id'];
+          .eq('class_id', classId)
+          .eq('subject_id', subjectId)
+          .eq('semester', semester)
+          .eq('type', type)
+          .eq('type_index', index)
+          .maybeSingle();
+
+      if (existingEval != null) {
+        finalEvalId = existingEval['id'];
+        await client
+            .from('evaluations')
+            .update({'title': title, 'date': DateTime.now().toIso8601String()})
+            .eq('id', finalEvalId);
+      } else {
+        // Création
+        final newEval = await client
+            .from('evaluations')
+            .insert({
+              'title': title,
+              'date': DateTime.now().toIso8601String(),
+              'semester': semester,
+              'type': type,
+              'type_index': index,
+              'class_id': classId,
+              'subject_id': subjectId,
+              'created_by': user.id,
+            })
+            .select('id')
+            .single();
+        finalEvalId = newEval['id'];
+      }
     }
 
     // 2. Préparer les notes avec l'ID de l'évaluation
     final gradesToInsert = grades.map((g) {
       return {
-        'evaluation_id': evaluationId,
+        'evaluation_id': finalEvalId,
         'student_id': g['student_id'],
         'note': g['note'], // Renamed 'score' -> 'note'
         'is_absent': g['is_absent'],
@@ -352,15 +367,15 @@ class SupabaseService {
     required int semester,
     int? subjectId,
   }) async {
-    // Utilisons la vue qui aggrège déjà
-    final query = client
+    // Version compatible : On récupère uniquement les colonnes nécessaires
+    var query = client
         .from('view_student_subject_performance')
         .select('interro_avg, devoir1, devoir2')
         .eq('class_id', classId)
         .eq('semester', semester);
 
     if (subjectId != null) {
-      query.eq('subject_id', subjectId);
+      query = query.eq('subject_id', subjectId);
     }
 
     final data = await query;

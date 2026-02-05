@@ -250,10 +250,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint('Erreur chargement Dashboard: $e'); // Log technique pour debug
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Impossible de charger les données. Vérifiez votre connexion',
-            ),
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }

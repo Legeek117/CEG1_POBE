@@ -27,7 +27,12 @@ class SupabaseService {
 
   // --- App Config & Updates ---
   static Future<Map<String, dynamic>> fetchAppConfig() async {
-    return await client.from('app_config').select('*').limit(1).single();
+    final response = await client
+        .from('app_config')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+    return response ?? {};
   }
 
   // --- Auth ---
@@ -74,7 +79,12 @@ class SupabaseService {
   static Future<Map<String, dynamic>?> fetchCurrentProfile() async {
     final user = client.auth.currentUser;
     if (user == null) return null;
-    return await client.from('profiles').select('*').eq('id', user.id).single();
+    return await client
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .limit(1)
+        .maybeSingle();
   }
 
   static Future<Map<String, dynamic>?> fetchManagedClass() async {
@@ -84,16 +94,26 @@ class SupabaseService {
         .from('classes')
         .select('*')
         .eq('main_teacher_id', user.id)
+        .limit(1)
         .maybeSingle();
   }
 
   // --- Global Settings & Locks ---
   static Future<Map<String, dynamic>> fetchGlobalSettings() async {
-    return await client
+    final response = await client
         .from('academic_years')
         .select('*')
         .eq('is_active', true)
-        .single();
+        .limit(1)
+        .maybeSingle();
+    return response ??
+        {
+          'name': 'Année Inconnue',
+          'is_active': true,
+          'is_semester1_locked': false,
+          'is_semester2_locked': false,
+          'current_semester': 1,
+        };
   }
 
   static Future<List<Map<String, dynamic>>> fetchCensorUnlocks() async {
@@ -128,33 +148,37 @@ class SupabaseService {
     // Charger les coefficients dynamiques depuis la DB
     final allCoeffs = await fetchSubjectCoefficients();
 
-    return data.map((e) {
-      final classData = Map<String, dynamic>.from(e['classes'] as Map);
-      final subjectId = e['subject_id'] as int;
-      classData['subject_id'] = subjectId;
-      classData['subject_name'] = (e['subjects'] as Map)['name'];
+    return data.where((e) => e['classes'] != null && e['subjects'] != null).map(
+      (e) {
+        final classData = Map<String, dynamic>.from(e['classes'] as Map);
+        final subjectData = e['subjects'] as Map;
+        final subjectId = e['subject_id'] as int;
+        classData['subject_id'] = subjectId;
+        classData['subject_name'] = subjectData['name'] ?? 'Matière Inconnue';
 
-      // Extraction du nom du PP
-      final mainTeacher = classData['main_teacher'];
-      if (mainTeacher != null) {
-        classData['main_teacher_name'] = mainTeacher['full_name'];
-      }
+        // Extraction du nom du PP
+        final mainTeacher = classData['main_teacher'];
+        if (mainTeacher != null && mainTeacher is Map) {
+          classData['main_teacher_name'] = mainTeacher['full_name'];
+        }
 
-      // Extraction du count
-      final studentsList = classData['students'] as List;
-      classData['student_count'] = studentsList.isNotEmpty
-          ? (studentsList[0]['count'] ?? 0)
-          : 0;
+        // Extraction du count
+        final studentsList = classData['students'] as List?;
+        classData['student_count'] =
+            (studentsList != null && studentsList.isNotEmpty)
+            ? (studentsList[0]['count'] ?? 0)
+            : 0;
 
-      // Détermination dynamique du coefficient via les règles DB
-      classData['coefficient'] = findCoefficient(
-        rules: allCoeffs,
-        subjectId: subjectId,
-        className: classData['name'] ?? '',
-      );
+        // Détermination dynamique du coefficient via les règles DB
+        classData['coefficient'] = findCoefficient(
+          rules: allCoeffs,
+          subjectId: subjectId,
+          className: classData['name'] ?? '',
+        );
 
-      return classData;
-    }).toList();
+        return classData;
+      },
+    ).toList();
   }
 
   static int findCoefficient({

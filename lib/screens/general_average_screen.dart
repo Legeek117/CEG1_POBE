@@ -55,14 +55,17 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       final allCoeffRules = await SupabaseService.fetchSubjectCoefficients();
 
       // CHARGEMENT SEMESTRE SÉLECTIONNÉ
+      // Note: Si mode Annuel (S3), on utilise S2 comme base technique pour les élèves
+      int loadingSemester = _selectedSemester == 3 ? 2 : _selectedSemester;
+
       final records = await SupabaseService.fetchClassPerformanceRecords(
         classId: int.parse(widget.schoolClass.id),
-        semester: _selectedSemester,
+        semester: loadingSemester,
       );
 
-      // SI S2, ON CHARGE AUSSI S1 POUR LA MOYENNE ANNUELLE
+      // SI S2 OU ANNUEL, ON CHARGE AUSSI S1 POUR LA MOYENNE ANNUELLE
       Map<String, List<Map<String, dynamic>>> studentsS1Map = {};
-      if (_selectedSemester == 2) {
+      if (_selectedSemester >= 2) {
         final recordsS1 = await SupabaseService.fetchClassPerformanceRecords(
           classId: int.parse(widget.schoolClass.id),
           semester: 1,
@@ -102,8 +105,8 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       for (var sid in studentNames.keys) {
         final performances = studentsMap[sid]!;
 
-        // --- CALCUL S1 (Si S2 view) ---
-        if (_selectedSemester == 2) {
+        // --- CALCUL S1 (Si S2 ou Annuel view) ---
+        if (_selectedSemester >= 2) {
           double s1Points = 0;
           int s1Coeffs = 0;
           double s1Conduct = 0;
@@ -180,9 +183,9 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
             ? totalWeightedPointsWithConduct / totalCoeffsWithConduct
             : 0.0;
 
-        // MOYENNE ANNUELLE (si S2)
+        // MOYENNE ANNUELLE (si S2 ou Annuel)
         double? annualAvg;
-        if (_selectedSemester == 2) {
+        if (_selectedSemester >= 2) {
           final s1GA = _s1GeneralAverages[sid] ?? 0.0;
           annualAvg = ((ga * 2) + s1GA) / 3;
         }

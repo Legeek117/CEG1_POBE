@@ -189,12 +189,24 @@ class SupabaseService {
     // Filtrer par matière
     final subjectRules = rules.where((r) => r['subject_id'] == subjectId);
 
+    // Normalisation agressive (minuscules, sans accents, remplacements communs)
+    final baseNormalized = _removeAccents(className.toLowerCase());
+    final normalizedClassName = baseNormalized
+        .replaceAll('1ere', '1ère')
+        .replaceAll('2nde', '2n') // Pour matcher "2N"
+        .replaceAll('1ere', '1e') // Pour matcher "1E"
+        .replaceFirst('tle', 'terminale');
+
     for (var rule in subjectRules) {
       // 1. Check Level Pattern (Regex)
       final levelPattern = rule['level_pattern'] as String;
       try {
         final levelRegex = RegExp(levelPattern, caseSensitive: false);
-        if (!levelRegex.hasMatch(className)) continue;
+        if (!levelRegex.hasMatch(className) &&
+            !levelRegex.hasMatch(normalizedClassName) &&
+            !levelRegex.hasMatch(baseNormalized)) {
+          continue;
+        }
       } catch (e) {
         debugPrint("Invalid regex in DB for rule ${rule['id']}: $levelPattern");
         continue;
@@ -203,19 +215,28 @@ class SupabaseService {
       // 2. Check Series (si défini)
       final series = rule['series'] as String?;
       if (series != null && series.isNotEmpty) {
-        // La classe doit contenir la série (ex: "A1")
-        // MAIS attention aux faux positifs (ex: "A12" ne doit pas matcher "A1")
-        // "A1-1", "A1 1", "A1" doivent matcher "A1"
+        final ruleSeries = series.toLowerCase();
+        final lowerClassName = className.toLowerCase();
 
-        // Regex : Series + (Fin de chaine OU Non-Word OU Tiret)
-        // On escape la série au cas où elle contient des caractères spéciaux
+        // 1ere tentative : Match exact du mot (ex: "A1" dans "Tle A1")
         final escapedSeries = RegExp.escape(series);
         final seriesRegex = RegExp(
-          '$escapedSeries(?:\\b|[^a-zA-Z0-9]|-|\\s|\$)',
+          escapedSeries + r'(?:\b|[^a-zA-Z0-9]|-|\s|$)',
           caseSensitive: false,
         );
 
-        if (!seriesRegex.hasMatch(className)) continue;
+        // 2eme tentative : Si la classe finit par "A" et la règle est "A1", on accepte
+        bool simpleMatch = false;
+        final parts = lowerClassName.split(RegExp(r'\s+|-'));
+        for (var part in parts) {
+          if (part == ruleSeries ||
+              (part.length == 1 && ruleSeries.startsWith(part))) {
+            simpleMatch = true;
+            break;
+          }
+        }
+
+        if (!seriesRegex.hasMatch(className) && !simpleMatch) continue;
       }
 
       // Match trouvé
@@ -458,5 +479,14 @@ class SupabaseService {
         .update({'is_read': true})
         .or('receiver_id.is.null,receiver_id.eq.${user.id}')
         .eq('is_read', false);
+  }
+
+  static String _removeAccents(String str) {
+    var withDia = 'àáâãäåèéêëìíîïòóôõöùúûüýÿÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝ';
+    var withoutDia = 'aaaaaaeeeeiiiiooooouuuuyyAAAAAAEEEEIIIIOOOOOUUUUY';
+    for (int i = 0; i < withDia.length; i++) {
+      str = str.replaceAll(withDia[i], withoutDia[i]);
+    }
+    return str;
   }
 }

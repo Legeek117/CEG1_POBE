@@ -53,6 +53,10 @@ class PersistenceService {
             'matieres': c.matieres,
             'subjectId': c.subjectId,
             'coeff': c.coeff,
+            'subjectCoeffs': c.subjectCoeffs.map(
+              (k, v) => MapEntry(k.toString(), v),
+            ),
+            'subjectToCoeff': c.subjectToCoeff,
             'cycle': c.cycle,
             'level': c.level,
             'mainTeacherName': c.mainTeacherName,
@@ -78,6 +82,16 @@ class PersistenceService {
             matieres: List<String>.from(item['matieres']),
             subjectId: item['subjectId'],
             coeff: item['coeff'] ?? 1,
+            subjectCoeffs:
+                (item['subjectCoeffs'] as Map<String, dynamic>?)?.map(
+                  (k, v) => MapEntry(int.parse(k), v as int),
+                ) ??
+                <int, int>{},
+            subjectToCoeff:
+                (item['subjectToCoeff'] as Map<String, dynamic>?)?.map(
+                  (k, v) => MapEntry(k, v as int),
+                ) ??
+                <String, int>{},
             cycle: item['cycle'],
             level: item['level'],
             mainTeacherName: item['mainTeacherName'],

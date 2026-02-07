@@ -180,15 +180,18 @@ class _MainNavigationHandlerState extends State<MainNavigationHandler> {
       orElse: () => {},
     );
 
-    if (evalLock.isEmpty)
+    if (evalLock.isEmpty) {
       return true; // Pas dans la liste -> Verrouillé par défaut
+    }
 
     // 3. Vérifier les dates (si présentes)
     final now = DateTime.now();
     try {
       if (evalLock['start_date'] != null) {
         final start = DateTime.parse(evalLock['start_date']);
-        if (now.isBefore(start)) return true;
+        if (now.isBefore(start)) {
+          return true;
+        }
       }
       if (evalLock['end_date'] != null) {
         final end = DateTime.parse(

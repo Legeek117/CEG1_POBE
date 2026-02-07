@@ -103,61 +103,160 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // REGROUPEMENT PAR CLASSE (Plusieurs matières -> Une seule carte)
         final Map<String, SchoolClass> groupedClasses = {};
 
-        for (var c in fetchedClassesData) {
-          final className = c['name'];
-          final level = c['level'] ?? '6ème';
-          final cycle = c['cycle'] ?? 1;
-          final subjectName = c['subject_name'] ?? '';
-          final subjectId = c['subject_id'];
+        try {
+          for (var c in fetchedClassesData) {
+            final className = c['name'];
+            final level = c['level'] ?? '6ème';
+            final cycle = c['cycle'] ?? 1;
+            final subjectName = c['subject_name'] ?? '';
+            final subjectId = c['subject_id'];
 
-          if (!groupedClasses.containsKey(className)) {
-            groupedClasses[className] = SchoolClass(
-              id: c['id'].toString(),
-              name: className,
-              studentCount: c['student_count'] ?? 0,
-              lastEntryDate: 'N/A',
-              subjectId: subjectId,
-              matieres: [subjectName],
-              cycle: cycle,
-              level: level,
-              mainTeacherName: c['main_teacher_name'],
-              coeff: c['coefficient'] ?? 1,
-            );
-          } else {
-            // Ajouter la matière si elle n'est pas déjà présente
-            if (!groupedClasses[className]!.matieres.contains(subjectName)) {
-              groupedClasses[className]!.matieres.add(subjectName);
+            if (className == null) continue;
+
+            // Détermination du PP pour cette ligne
+            String? rowPP = c['main_teacher_name'];
+            if (rowPP == null &&
+                AppState.isPrincipalTeacher &&
+                managedClass != null &&
+                className == managedClass['name']) {
+              rowPP = AppState.teacherName;
+            }
+
+            if (!groupedClasses.containsKey(className)) {
+              groupedClasses[className] = SchoolClass(
+                id: c['id']?.toString() ?? 'unknown',
+                name: className,
+                studentCount: c['student_count'] ?? 0,
+                lastEntryDate: 'N/A',
+                subjectId: subjectId,
+                matieres: [subjectName],
+                subjectCoeffs: subjectName.toLowerCase() != 'conduite'
+                    ? <int, int>{subjectId: c['coefficient'] ?? 1}
+                    : <int, int>{},
+                subjectToCoeff: subjectName.toLowerCase() != 'conduite'
+                    ? <String, int>{subjectName: c['coefficient'] ?? 1}
+                    : <String, int>{},
+                cycle: cycle,
+                level: level,
+                mainTeacherName: rowPP,
+                coeff: c['coefficient'] ?? 1,
+              );
+            } else {
+              final existing = groupedClasses[className]!;
+
+              // Mettre à jour le PP si on le trouve (ou forcer le nôtre)
+              String? updatedPP = existing.mainTeacherName ?? rowPP;
+              if (AppState.isPrincipalTeacher &&
+                  managedClass != null &&
+                  className == managedClass['name']) {
+                updatedPP = AppState.teacherName;
+              }
+
+              // Ajouter la matière
+              if (!existing.matieres.contains(subjectName)) {
+                existing.matieres.add(subjectName);
+
+                if (subjectName.toLowerCase() != 'conduite') {
+                  if (subjectId != null) {
+                    existing.subjectCoeffs[subjectId] = c['coefficient'] ?? 1;
+                  }
+                  existing.subjectToCoeff[subjectName] = c['coefficient'] ?? 1;
+                }
+
+                // Mise à jour du coefficient principal (legacy) et du PP
+                int updatedCoeff = existing.coeff;
+                int? updatedSubjectId = existing.subjectId;
+
+                if (subjectName.toLowerCase() != 'conduite') {
+                  updatedCoeff = c['coefficient'] ?? 1;
+                  updatedSubjectId = subjectId;
+                }
+
+                groupedClasses[className] = SchoolClass(
+                  id: existing.id,
+                  name: existing.name,
+                  studentCount: existing.studentCount,
+                  lastEntryDate: existing.lastEntryDate,
+                  matieres: List<String>.from(existing.matieres),
+                  subjectId: updatedSubjectId,
+                  subjectCoeffs: Map<int, int>.from(existing.subjectCoeffs),
+                  subjectToCoeff: Map<String, int>.from(
+                    existing.subjectToCoeff,
+                  ),
+                  cycle: existing.cycle,
+                  level: existing.level,
+                  mainTeacherName: updatedPP,
+                  coeff: updatedCoeff,
+                );
+              } else if (updatedPP != existing.mainTeacherName) {
+                // Juste mise à jour du PP si nécessaire
+                groupedClasses[className] = SchoolClass(
+                  id: existing.id,
+                  name: existing.name,
+                  studentCount: existing.studentCount,
+                  lastEntryDate: existing.lastEntryDate,
+                  matieres: List<String>.from(existing.matieres),
+                  subjectId: existing.subjectId,
+                  subjectCoeffs: Map<int, int>.from(existing.subjectCoeffs),
+                  subjectToCoeff: Map<String, int>.from(
+                    existing.subjectToCoeff,
+                  ),
+                  cycle: existing.cycle,
+                  level: existing.level,
+                  mainTeacherName: updatedPP,
+                  coeff: existing.coeff,
+                );
+              }
             }
           }
-        }
 
-        // Si je suis PP, j'ajoute "Conduite" à ma classe gérée si elle n'y est pas
-        if (AppState.isPrincipalTeacher && managedClass != null) {
-          final managedClassName = managedClass['name'];
-          final level = managedClass['level'] ?? '6ème';
-          final cycle = managedClass['cycle'] ?? 1;
+          // Si je suis PP, j'ajoute "Conduite" à ma classe gérée si elle n'y est pas
+          if (AppState.isPrincipalTeacher && managedClass != null) {
+            final managedClassName = managedClass['name'];
+            final level = managedClass['level'] ?? '6ème';
+            final cycle = managedClass['cycle'] ?? 1;
 
-          if (groupedClasses.containsKey(managedClassName)) {
-            if (!groupedClasses[managedClassName]!.matieres.contains(
-              'Conduite',
-            )) {
-              groupedClasses[managedClassName]!.matieres.add('Conduite');
+            if (managedClassName != null &&
+                groupedClasses.containsKey(managedClassName)) {
+              final existing = groupedClasses[managedClassName]!;
+              if (!existing.matieres.contains('Conduite')) {
+                final newMatieres = List<String>.from(existing.matieres)
+                  ..add('Conduite');
+                groupedClasses[managedClassName] = SchoolClass(
+                  id: existing.id,
+                  name: existing.name,
+                  studentCount: existing.studentCount,
+                  lastEntryDate: existing.lastEntryDate,
+                  matieres: newMatieres,
+                  subjectId: existing.subjectId,
+                  subjectCoeffs: Map<int, int>.from(existing.subjectCoeffs),
+                  subjectToCoeff: Map<String, int>.from(
+                    existing.subjectToCoeff,
+                  ),
+                  cycle: existing.cycle,
+                  level: existing.level,
+                  mainTeacherName: AppState.teacherName,
+                  coeff: existing.coeff,
+                );
+              }
+            } else if (managedClassName != null) {
+              // Cas rare : Le PP n'enseigne aucune matière dans sa propre classe
+              groupedClasses[managedClassName] = SchoolClass(
+                id: AppState.managedClassId ?? 'unknown_managed',
+                name: managedClassName,
+                studentCount: 0,
+                lastEntryDate: 'N/A',
+                subjectId: null,
+                matieres: const ['Conduite'],
+                cycle: cycle,
+                level: level,
+                mainTeacherName: AppState.teacherName,
+                coeff: 1,
+              );
             }
-          } else {
-            // Cas rare : Le PP n'enseigne aucune matière dans sa propre classe
-            groupedClasses[managedClassName] = SchoolClass(
-              id: AppState.managedClassId!,
-              name: managedClassName,
-              studentCount: 0, // Sera mis à jour si besoin ou restera 0
-              lastEntryDate: 'N/A',
-              subjectId: null,
-              matieres: ['Conduite'],
-              cycle: cycle,
-              level: level,
-              mainTeacherName: AppState.teacherName,
-              coeff: 1,
-            );
           }
+        } catch (e) {
+          debugPrint('Erreur critique lors du regroupement des classes: $e');
         }
 
         final List<SchoolClass> classes = groupedClasses.values.toList();
@@ -831,13 +930,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             if (schoolClass.mainTeacherName != null)
                               const SizedBox(width: 8),
-                            Text(
-                              'Coeff: ${schoolClass.coeff}',
-                              style: const TextStyle(
-                                color: AppTheme.primaryBlue,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
+                            // Affichage des coefficients respectifs (format: Matière: Coeff)
+                            Builder(
+                              builder: (context) {
+                                try {
+                                  final List<String> respectiveCoeffs = [];
+                                  final map = schoolClass.subjectToCoeff;
+
+                                  for (var m in schoolClass.matieres) {
+                                    if (m.toLowerCase() != 'conduite') {
+                                      final c = map[m] ?? schoolClass.coeff;
+                                      respectiveCoeffs.add('$m: $c');
+                                    }
+                                  }
+
+                                  String display = respectiveCoeffs.isEmpty
+                                      ? 'Coeff: ${schoolClass.coeff}'
+                                      : respectiveCoeffs.join(', ');
+
+                                  return Text(
+                                    display,
+                                    style: const TextStyle(
+                                      color: AppTheme.primaryBlue,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  );
+                                } catch (e) {
+                                  return Text(
+                                    'Coeff: ${schoolClass.coeff}',
+                                    style: const TextStyle(
+                                      color: AppTheme.primaryBlue,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  );
+                                }
+                              },
                             ),
                           ],
                         ),

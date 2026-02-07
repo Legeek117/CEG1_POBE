@@ -22,8 +22,10 @@ class SchoolClass {
   final int studentCount;
   final String lastEntryDate;
   final List<String> matieres;
-  final int? subjectId;
-  final int coeff;
+  final int? subjectId; // Premier subjectId trouvé
+  final int coeff; // Premier coefficient trouvé (legacy)
+  final Map<int, int> subjectCoeffs; // Mappe subject_id -> coefficient
+  final Map<String, int> subjectToCoeff; // Mappe nom_matière -> coefficient
   final int? cycle; // 1 or 2
   final String? level; // 6ème, 3ème, etc.
   final String? mainTeacherName;
@@ -36,6 +38,8 @@ class SchoolClass {
     required this.matieres,
     this.subjectId,
     this.coeff = 1,
+    this.subjectCoeffs = const <int, int>{},
+    this.subjectToCoeff = const <String, int>{},
     this.cycle,
     this.level,
     this.mainTeacherName,

@@ -84,7 +84,7 @@ class _SetupEvalScreenState extends State<SetupEvalScreen> {
         return Student(
           id: s['id'].toString(),
           matricule: s['matricule'],
-          name: '${s['first_name']} ${s['last_name']}',
+          name: '${s['last_name']} ${s['first_name']}',
         );
       }).toList();
 

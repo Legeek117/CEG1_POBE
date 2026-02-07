@@ -84,7 +84,7 @@ class _GeneralAverageScreenState extends State<GeneralAverageScreen> {
       for (var s in studentsList) {
         final sid = s['id'].toString();
         studentsMap[sid] = [];
-        studentNames[sid] = '${s['first_name']} ${s['last_name']}';
+        studentNames[sid] = '${s['last_name']} ${s['first_name']}';
         studentMatricules[sid] = s['matricule'] ?? 'N/A';
       }
 

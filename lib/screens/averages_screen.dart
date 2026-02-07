@@ -236,7 +236,7 @@ class _AveragesScreenState extends State<AveragesScreen> {
                       itemBuilder: (context, index) {
                         final item = sortedData[index];
                         final studentName =
-                            '${item['first_name']} ${item['last_name']}';
+                            '${item['last_name']} ${item['first_name']}';
                         final interroAvg =
                             (item['interro_avg'] as num?)?.toDouble() ?? 0.0;
 
